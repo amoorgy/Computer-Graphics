@@ -89,9 +89,9 @@ float powerUpSpawnTimer = 0.0f;
 void initGame() {
     srand(time(NULL));
     
-    // Initialize player
+    // Initialize player with better stats
     player.x = WIDTH / 2.0f;
-    player.y = 100.0f;
+    player.y = 110.0f; // Start slightly higher
     player.velocityX = 0.0f;
     player.velocityY = 0.0f;
     player.width = 30.0f;
@@ -109,25 +109,47 @@ void initGame() {
     // Ground platform
     platforms.push_back({0, 80, WIDTH, 20, true});
     
-    // Level platforms with different sizes (small, medium, large)
-    float platformY = 150;
-    for (int i = 0; i < 15; i++) {
+    // Level platforms with different sizes (small, medium, large) - More forgiving spacing
+    float platformY = 130;
+    for (int i = 0; i < 18; i++) {
         float platformWidth;
-        if (i % 3 == 0) platformWidth = 80;  // Small
-        else if (i % 3 == 1) platformWidth = 120; // Medium
-        else platformWidth = 160; // Large
+        if (i % 3 == 0) platformWidth = 100;  // Small (increased)
+        else if (i % 3 == 1) platformWidth = 140; // Medium (increased)
+        else platformWidth = 180; // Large (increased)
         
-        float platformX = rand() % (int)(WIDTH - platformWidth);
-        platforms.push_back({platformX, platformY, platformWidth, 15, true});
-        platformY += 60 + rand() % 40;
+        // Ensure platforms are more reachable from each other
+        float platformX;
+        if (i == 0) {
+            platformX = WIDTH / 2 - platformWidth / 2; // Center first platform
+        } else {
+            // Keep platforms within reasonable jumping distance
+            float prevX = platforms.back().x + platforms.back().width / 2;
+            float maxDistance = 150; // Maximum horizontal distance
+            float minX = std::max(0.0f, prevX - maxDistance);
+            float maxX = std::min((float)(WIDTH - platformWidth), prevX + maxDistance - platformWidth);
+            platformX = minX + rand() % (int)(maxX - minX + 1);
+        }
+        
+        platforms.push_back({platformX, platformY, platformWidth, 18, true});
+        platformY += 45 + rand() % 25; // Closer vertical spacing
     }
     
-    // Create collectables (at least 5)
+    // Create collectables (at least 5) - Place them near platforms
     collectables.clear();
     for (int i = 0; i < 8; i++) {
-        float x = 50 + rand() % (WIDTH - 100);
-        float y = 200 + i * 80 + rand() % 40;
-        collectables.push_back({x, y, false, 0.0f});
+        if (i < platforms.size() - 1) {
+            // Place collectables near platforms for easier collection
+            float platX = platforms[i + 1].x + platforms[i + 1].width / 2;
+            float platY = platforms[i + 1].y + platforms[i + 1].height + 20;
+            float x = platX + (rand() % 60 - 30); // Small offset from platform center
+            float y = platY + (rand() % 30);
+            collectables.push_back({x, y, false, 0.0f});
+        } else {
+            // Backup placement for extra collectables
+            float x = 100 + rand() % (WIDTH - 200);
+            float y = 250 + i * 60 + rand() % 30;
+            collectables.push_back({x, y, false, 0.0f});
+        }
     }
     
     rocks.clear();
@@ -562,59 +584,124 @@ void drawPowerUps() {
 
 // Draw HUD
 void drawHUD() {
+    // Health section
+    glColor3f(1.0f, 1.0f, 1.0f);
+    drawText(10, HEIGHT - 15, "Health:");
+    
     // Health bar (2+ primitives: rectangle background, rectangle health)
     glColor3f(0.3f, 0.3f, 0.3f);
     glBegin(GL_QUADS);
-    glVertex2f(10, HEIGHT - 40);
-    glVertex2f(110, HEIGHT - 40);
-    glVertex2f(110, HEIGHT - 20);
-    glVertex2f(10, HEIGHT - 20);
+    glVertex2f(70, HEIGHT - 25);
+    glVertex2f(170, HEIGHT - 25);
+    glVertex2f(170, HEIGHT - 10);
+    glVertex2f(70, HEIGHT - 10);
     glEnd();
     
-    glColor3f(1.0f, 0.2f, 0.2f);
-    float healthWidth = 100.0f * playerLives / 3.0f;
+    // Health bar fill with color coding
+    float healthRatio = (float)playerLives / 3.0f;
+    if (healthRatio > 0.6f) glColor3f(0.2f, 0.8f, 0.2f); // Green
+    else if (healthRatio > 0.3f) glColor3f(0.8f, 0.8f, 0.2f); // Yellow
+    else glColor3f(0.8f, 0.2f, 0.2f); // Red
+    
+    float healthWidth = 100.0f * healthRatio;
     glBegin(GL_QUADS);
-    glVertex2f(10, HEIGHT - 40);
-    glVertex2f(10 + healthWidth, HEIGHT - 40);
-    glVertex2f(10 + healthWidth, HEIGHT - 20);
-    glVertex2f(10, HEIGHT - 20);
+    glVertex2f(70, HEIGHT - 25);
+    glVertex2f(70 + healthWidth, HEIGHT - 25);
+    glVertex2f(70 + healthWidth, HEIGHT - 10);
+    glVertex2f(70, HEIGHT - 10);
     glEnd();
+    
+    // Lives text
+    glColor3f(1.0f, 1.0f, 1.0f);
+    std::stringstream livesText;
+    livesText << playerLives << "/3";
+    drawText(180, HEIGHT - 20, livesText.str().c_str());
+    
+    // Lava danger section
+    glColor3f(1.0f, 1.0f, 1.0f);
+    drawText(250, HEIGHT - 15, "Lava Danger:");
     
     // Lava danger indicator (2+ primitives: rectangle background, rectangle danger)
     glColor3f(0.3f, 0.3f, 0.3f);
     glBegin(GL_QUADS);
-    glVertex2f(130, HEIGHT - 40);
-    glVertex2f(230, HEIGHT - 40);
-    glVertex2f(230, HEIGHT - 20);
-    glVertex2f(130, HEIGHT - 20);
+    glVertex2f(340, HEIGHT - 25);
+    glVertex2f(440, HEIGHT - 25);
+    glVertex2f(440, HEIGHT - 10);
+    glVertex2f(340, HEIGHT - 10);
     glEnd();
     
-    float dangerLevel = (lavaHeight / (HEIGHT * 0.8f));
-    glColor3f(1.0f, dangerLevel, 0.0f);
+    float dangerLevel = std::min(1.0f, lavaHeight / (HEIGHT * 0.7f));
+    glColor3f(1.0f, 1.0f - dangerLevel, 0.0f);
     float dangerWidth = 100.0f * dangerLevel;
     glBegin(GL_QUADS);
-    glVertex2f(130, HEIGHT - 40);
-    glVertex2f(130 + dangerWidth, HEIGHT - 40);
-    glVertex2f(130 + dangerWidth, HEIGHT - 20);
-    glVertex2f(130, HEIGHT - 20);
+    glVertex2f(340, HEIGHT - 25);
+    glVertex2f(340 + dangerWidth, HEIGHT - 25);
+    glVertex2f(340 + dangerWidth, HEIGHT - 10);
+    glVertex2f(340, HEIGHT - 10);
     glEnd();
     
     // Score display
     glColor3f(1.0f, 1.0f, 1.0f);
     std::stringstream ss;
     ss << "Score: " << score;
-    drawText(WIDTH - 150, HEIGHT - 30, ss.str().c_str());
+    drawText(WIDTH - 150, HEIGHT - 20, ss.str().c_str());
+    
+    // Collectables counter
+    int collected = 0;
+    for (const auto& c : collectables) {
+        if (c.collected) collected++;
+    }
+    std::stringstream collectText;
+    collectText << "Coins: " << collected << "/" << collectables.size();
+    drawText(WIDTH - 150, HEIGHT - 40, collectText.str().c_str());
+    
+    // Key status
+    if (keySpawned && !keyCollected) {
+        glColor3f(1.0f, 1.0f, 0.0f);
+        drawText(WIDTH / 2 - 60, HEIGHT - 60, "KEY AVAILABLE!");
+    } else if (keyCollected) {
+        glColor3f(0.0f, 1.0f, 0.0f);
+        drawText(WIDTH / 2 - 50, HEIGHT - 60, "KEY FOUND!");
+    } else {
+        glColor3f(0.8f, 0.8f, 0.8f);
+        std::stringstream keyText;
+        keyText << "Collect " << (5 - collected) << " more coins for key";
+        if (collected < 5) drawText(WIDTH / 2 - 80, HEIGHT - 60, keyText.str().c_str());
+    }
     
     // Power-up indicator
     if (player.powerUpType > 0) {
         glColor3f(0.0f, 1.0f, 0.0f);
-        std::string powerUpText = (player.powerUpType == 1) ? "SHIELD" : "DOUBLE JUMP";
-        drawText(WIDTH / 2 - 40, HEIGHT - 30, powerUpText.c_str());
+        std::string powerUpText = (player.powerUpType == 1) ? "SHIELD ACTIVE" : "DOUBLE JUMP ACTIVE";
+        drawText(WIDTH / 2 - 50, HEIGHT - 40, powerUpText.c_str());
+        
+        // Timer bar for power-up
+        float timerRatio = player.powerUpTimer / 12.0f;
+        glColor3f(0.2f, 0.2f, 0.2f);
+        glBegin(GL_QUADS);
+        glVertex2f(WIDTH / 2 - 50, HEIGHT - 35);
+        glVertex2f(WIDTH / 2 + 50, HEIGHT - 35);
+        glVertex2f(WIDTH / 2 + 50, HEIGHT - 30);
+        glVertex2f(WIDTH / 2 - 50, HEIGHT - 30);
+        glEnd();
+        
+        glColor3f(0.0f, 0.8f, 0.8f);
+        glBegin(GL_QUADS);
+        glVertex2f(WIDTH / 2 - 50, HEIGHT - 35);
+        glVertex2f(WIDTH / 2 - 50 + 100 * timerRatio, HEIGHT - 35);
+        glVertex2f(WIDTH / 2 - 50 + 100 * timerRatio, HEIGHT - 30);
+        glVertex2f(WIDTH / 2 - 50, HEIGHT - 30);
+        glEnd();
     }
+    
+    // Controls reminder
+    glColor3f(0.7f, 0.7f, 0.7f);
+    drawText(10, 20, "Controls: WASD/Arrows to move, Space/W/Up to jump");
 }
 
 // Draw game over screen
 void drawGameOver() {
+    // Semi-transparent background
     glColor3f(0.0f, 0.0f, 0.0f);
     glBegin(GL_QUADS);
     glVertex2f(0, 0);
@@ -623,20 +710,46 @@ void drawGameOver() {
     glVertex2f(0, HEIGHT);
     glEnd();
     
-    glColor3f(1.0f, 0.0f, 0.0f);
-    drawText(WIDTH / 2 - 60, HEIGHT / 2, "GAME OVER");
+    // Game Over title
+    glColor3f(1.0f, 0.2f, 0.2f);
+    drawText(WIDTH / 2 - 60, HEIGHT / 2 + 60, "GAME OVER");
     
+    // Stats display
     glColor3f(1.0f, 1.0f, 1.0f);
     std::stringstream ss;
     ss << "Final Score: " << score;
-    drawText(WIDTH / 2 - 70, HEIGHT / 2 - 30, ss.str().c_str());
+    drawText(WIDTH / 2 - 70, HEIGHT / 2 + 20, ss.str().c_str());
     
-    drawText(WIDTH / 2 - 100, HEIGHT / 2 - 60, "Press R to restart or ESC to exit");
+    int collected = 0;
+    for (const auto& c : collectables) {
+        if (c.collected) collected++;
+    }
+    std::stringstream collectSS;
+    collectSS << "Coins Collected: " << collected << "/" << collectables.size();
+    drawText(WIDTH / 2 - 80, HEIGHT / 2 - 10, collectSS.str().c_str());
+    
+    std::stringstream timeSS;
+    timeSS << "Survival Time: " << (int)gameTime << " seconds";
+    drawText(WIDTH / 2 - 80, HEIGHT / 2 - 40, timeSS.str().c_str());
+    
+    // Instructions
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText(WIDTH / 2 - 100, HEIGHT / 2 - 90, "Press R to restart or ESC to exit");
+    
+    // Encouraging message
+    if (collected >= 5) {
+        glColor3f(0.2f, 0.8f, 0.2f);
+        drawText(WIDTH / 2 - 90, HEIGHT / 2 - 70, "Great job! You found the key!");
+    } else {
+        glColor3f(0.8f, 0.6f, 0.2f);
+        drawText(WIDTH / 2 - 100, HEIGHT / 2 - 70, "Try to collect more coins next time!");
+    }
 }
 
 // Draw game win screen
 void drawGameWin() {
-    glColor3f(0.0f, 0.2f, 0.0f);
+    // Celebratory background with gradient effect
+    glColor3f(0.0f, 0.3f, 0.1f);
     glBegin(GL_QUADS);
     glVertex2f(0, 0);
     glVertex2f(WIDTH, 0);
@@ -644,15 +757,56 @@ void drawGameWin() {
     glVertex2f(0, HEIGHT);
     glEnd();
     
-    glColor3f(0.0f, 1.0f, 0.0f);
-    drawText(WIDTH / 2 - 50, HEIGHT / 2, "YOU WIN!");
+    // Animated sparkles effect
+    glColor3f(1.0f, 1.0f, 0.0f);
+    for (int i = 0; i < 20; i++) {
+        float x = 50 + (i * 37) % (WIDTH - 100);
+        float y = 100 + (i * 23) % (HEIGHT - 200) + sin(gameTime * 3 + i) * 20;
+        glBegin(GL_TRIANGLES);
+        glVertex2f(x, y + 5);
+        glVertex2f(x - 3, y - 3);
+        glVertex2f(x + 3, y - 3);
+        glEnd();
+    }
     
+    // Victory title
+    glColor3f(0.2f, 1.0f, 0.2f);
+    drawText(WIDTH / 2 - 80, HEIGHT / 2 + 80, "CONGRATULATIONS!");
+    
+    glColor3f(1.0f, 1.0f, 0.0f);
+    drawText(WIDTH / 2 - 50, HEIGHT / 2 + 50, "YOU WIN!");
+    
+    // Detailed stats
     glColor3f(1.0f, 1.0f, 1.0f);
     std::stringstream ss;
     ss << "Final Score: " << score;
-    drawText(WIDTH / 2 - 70, HEIGHT / 2 - 30, ss.str().c_str());
+    drawText(WIDTH / 2 - 70, HEIGHT / 2 + 10, ss.str().c_str());
     
-    drawText(WIDTH / 2 - 100, HEIGHT / 2 - 60, "Press R to restart or ESC to exit");
+    int collected = 0;
+    for (const auto& c : collectables) {
+        if (c.collected) collected++;
+    }
+    std::stringstream collectSS;
+    collectSS << "Coins Collected: " << collected << "/" << collectables.size();
+    drawText(WIDTH / 2 - 80, HEIGHT / 2 - 20, collectSS.str().c_str());
+    
+    std::stringstream timeSS;
+    timeSS << "Completion Time: " << (int)gameTime << " seconds";
+    drawText(WIDTH / 2 - 85, HEIGHT / 2 - 50, timeSS.str().c_str());
+    
+    // Performance evaluation
+    glColor3f(0.2f, 0.8f, 1.0f);
+    if (gameTime < 60) {
+        drawText(WIDTH / 2 - 60, HEIGHT / 2 - 80, "SPEED RUNNER!");
+    } else if (collected == collectables.size()) {
+        drawText(WIDTH / 2 - 70, HEIGHT / 2 - 80, "PERFECT COLLECTOR!");
+    } else {
+        drawText(WIDTH / 2 - 70, HEIGHT / 2 - 80, "TOWER CONQUERED!");
+    }
+    
+    // Instructions
+    glColor3f(0.8f, 0.8f, 0.8f);
+    drawText(WIDTH / 2 - 100, HEIGHT / 2 - 110, "Press R to restart or ESC to exit");
 }
 
 // Update game logic
@@ -661,9 +815,9 @@ void update(float deltaTime) {
     
     gameTime += deltaTime;
     
-    // Update lava
-    lavaSpeed = 0.5f + gameTime * 0.01f; // Gradually increase speed
-    lavaHeight += lavaSpeed * deltaTime * 10;
+    // Update lava - slower and more forgiving
+    lavaSpeed = 0.3f + gameTime * 0.005f; // Slower increase
+    lavaHeight += lavaSpeed * deltaTime * 8; // Slower rising
     
     // Remove platforms touched by lava
     for (auto& platform : platforms) {
@@ -672,8 +826,8 @@ void update(float deltaTime) {
         }
     }
     
-    // Update player physics
-    player.velocityY -= 800.0f * deltaTime; // Gravity
+    // Update player physics - more responsive
+    player.velocityY -= 700.0f * deltaTime; // Slightly reduced gravity
     player.x += player.velocityX * deltaTime;
     player.y += player.velocityY * deltaTime;
     
@@ -712,11 +866,11 @@ void update(float deltaTime) {
         }
     }
     
-    // Spawn rocks
+    // Spawn rocks - less frequently
     rockSpawnTimer -= deltaTime;
     if (rockSpawnTimer <= 0) {
         rocks.push_back({(float)(rand() % (WIDTH - 20)), (float)HEIGHT, true});
-        rockSpawnTimer = 2.0f + (rand() % 3);
+        rockSpawnTimer = 4.0f + (rand() % 4); // Slower spawn rate
     }
     
     // Update rocks
@@ -792,14 +946,14 @@ void update(float deltaTime) {
         }
     }
     
-    // Spawn power-ups
+    // Spawn power-ups - more frequently
     powerUpSpawnTimer -= deltaTime;
     if (powerUpSpawnTimer <= 0 && powerUps.size() < 2) {
         int type = 1 + rand() % 2;
         float x = 50 + rand() % (WIDTH - 100);
         float y = lavaHeight + 100 + rand() % 200;
-        powerUps.push_back({x, y, type, true, 10.0f, 0.0f});
-        powerUpSpawnTimer = 15.0f + rand() % 10;
+        powerUps.push_back({x, y, type, true, 15.0f, 0.0f}); // Last longer
+        powerUpSpawnTimer = 10.0f + rand() % 8; // Spawn more often
     }
     
     // Update power-ups
@@ -818,7 +972,7 @@ void update(float deltaTime) {
         if (checkCollision(player.x, player.y, player.width, player.height,
                          powerUp.x - 15, powerUp.y - 15, 30, 30)) {
             player.powerUpType = powerUp.type;
-            player.powerUpTimer = 8.0f;
+            player.powerUpTimer = 12.0f; // Last longer when activated
             if (powerUp.type == 2) {
                 player.canDoubleJump = true;
             }
@@ -866,10 +1020,10 @@ void keyboard(unsigned char key, int x, int y) {
         case ' ':
             if (gameState == PLAYING) {
                 if (player.onGround) {
-                    player.velocityY = 400;
+                    player.velocityY = 450; // Higher jump
                     player.onGround = false;
                 } else if (player.canDoubleJump && !player.hasDoubleJumped) {
-                    player.velocityY = 300;
+                    player.velocityY = 350; // Higher double jump
                     player.hasDoubleJumped = true;
                 }
             }
@@ -886,17 +1040,17 @@ void specialKey(int key, int x, int y) {
     
     switch (key) {
         case GLUT_KEY_LEFT:
-            player.velocityX = -200;
+            player.velocityX = -250; // Faster movement
             break;
         case GLUT_KEY_RIGHT:
-            player.velocityX = 200;
+            player.velocityX = 250; // Faster movement
             break;
         case GLUT_KEY_UP:
             if (player.onGround) {
-                player.velocityY = 400;
+                player.velocityY = 450; // Higher jump
                 player.onGround = false;
             } else if (player.canDoubleJump && !player.hasDoubleJumped) {
-                player.velocityY = 300;
+                player.velocityY = 350; // Higher double jump
                 player.hasDoubleJumped = true;
             }
             break;
