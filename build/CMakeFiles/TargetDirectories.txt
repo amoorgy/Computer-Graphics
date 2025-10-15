@@ -1,0 +1,3 @@
+/Users/sorour/Documents/GitHub/Computer Graphics/build/CMakeFiles/IcyTower.dir
+/Users/sorour/Documents/GitHub/Computer Graphics/build/CMakeFiles/edit_cache.dir
+/Users/sorour/Documents/GitHub/Computer Graphics/build/CMakeFiles/rebuild_cache.dir
