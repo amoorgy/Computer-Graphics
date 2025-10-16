@@ -11,6 +11,7 @@
 #include <ctime>
 #include <string>
 #include <sstream>
+#include <algorithm>
 
 // Window dimensions
 const int WIDTH = 800;
@@ -111,6 +112,10 @@ float keyX, keyY;
 float keyAnimTime = 0.0f;
 bool keyCollected = false;
 float doorAnimTime = 0.0f;
+float doorUnlockAnimTime = 0.0f;
+float doorEnterAnimTime = 0.0f;
+bool doorIsUnlocking = false;
+bool doorIsEntering = false;
 float rockSpawnTimer = 0.0f;
 float powerUpSpawnTimer = 0.0f;
 
@@ -224,6 +229,13 @@ void initGame() {
     
     rocks.clear();
     powerUps.clear();
+    
+    // Reset door animation states
+    doorAnimTime = 0.0f;
+    doorUnlockAnimTime = 0.0f;
+    doorEnterAnimTime = 0.0f;
+    doorIsUnlocking = false;
+    doorIsEntering = false;
 }
 
 // Check collision between two rectangles
@@ -800,80 +812,227 @@ void drawKey() {
     glPopMatrix();
 }
 
-// Draw doors
+// Draw epic animated door
 void drawDoor() {
-    float doorX = WIDTH / 2 - 30;
-    float doorY = HEIGHT - 100;
+    float doorX = WIDTH / 2 - 40;
+    float doorY = HEIGHT - 120;
     
     glPushMatrix();
     glTranslatef(doorX, doorY, 0);
     
-    if (keyCollected) {
-        // Unlocked door (2+ primitives: rectangle frame, rectangle opening)
-        glColor3f(0.4f, 0.8f, 0.2f);
+    if (keyCollected || doorIsUnlocking) {
+        // Unlocked/Unlocking door with animations
+        float unlockProgress = doorIsUnlocking ? std::min(1.0f, doorUnlockAnimTime / 2.0f) : 1.0f;
+        float enterProgress = doorIsEntering ? std::min(1.0f, doorEnterAnimTime / 1.5f) : 0.0f;
         
-        // Door frame
-        glBegin(GL_QUADS);
-        glVertex2f(0, 0);
-        glVertex2f(60, 0);
-        glVertex2f(60, 80);
-        glVertex2f(0, 80);
-        glEnd();
-        
-        // Opening (darker rectangle)
-        glColor3f(0.1f, 0.1f, 0.1f);
-        glBegin(GL_QUADS);
-        glVertex2f(5, 5);
-        glVertex2f(55, 5);
-        glVertex2f(55, 75);
-        glVertex2f(5, 75);
-        glEnd();
-        
-        // Glowing effect
-        glColor3f(0.0f, 1.0f, 0.0f);
-        glBegin(GL_LINE_LOOP);
-        glVertex2f(-2, -2);
-        glVertex2f(62, -2);
-        glVertex2f(62, 82);
-        glVertex2f(-2, 82);
-        glEnd();
-    } else {
-        // Locked door (3+ primitives: rectangle frame, rectangle door, circle lock)
-        glColor3f(0.6f, 0.4f, 0.2f);
-        
-        // Door frame
-        glBegin(GL_QUADS);
-        glVertex2f(0, 0);
-        glVertex2f(60, 0);
-        glVertex2f(60, 80);
-        glVertex2f(0, 80);
-        glEnd();
-        
-        // Door surface
-        glColor3f(0.8f, 0.6f, 0.4f);
-        glBegin(GL_QUADS);
-        glVertex2f(5, 5);
-        glVertex2f(55, 5);
-        glVertex2f(55, 75);
-        glVertex2f(5, 75);
-        glEnd();
-        
-        // Lock (circle)
-        glColor3f(0.9f, 0.8f, 0.1f);
+        // Magical portal frame (hexagon)
+        glColor3f(0.2f + unlockProgress * 0.6f, 0.8f, 0.2f + unlockProgress * 0.6f);
         glBegin(GL_POLYGON);
-        for (int i = 0; i < 12; i++) {
-            float angle = 2.0f * M_PI * i / 12;
-            glVertex2f(30 + 8 * cos(angle), 40 + 8 * sin(angle));
+        for (int i = 0; i < 6; i++) {
+            float angle = M_PI / 2 + i * M_PI / 3;
+            glVertex2f(40 + 45 * cos(angle), 60 + 50 * sin(angle));
         }
         glEnd();
         
-        // Keyhole
-        glColor3f(0.1f, 0.1f, 0.1f);
-        glBegin(GL_TRIANGLES);
-        glVertex2f(30, 45);
-        glVertex2f(28, 35);
-        glVertex2f(32, 35);
+        // Inner portal (darker hexagon)
+        glColor3f(0.1f, 0.3f, 0.1f);
+        glBegin(GL_POLYGON);
+        for (int i = 0; i < 6; i++) {
+            float angle = M_PI / 2 + i * M_PI / 3;
+            glVertex2f(40 + 38 * cos(angle), 60 + 43 * sin(angle));
+        }
         glEnd();
+        
+        // Swirling energy vortex
+        for (int layer = 0; layer < 3; layer++) {
+            float layerOffset = layer * 0.5f;
+            float rotation = doorAnimTime * 2.0f + layerOffset;
+            float radius = 35 - layer * 8;
+            float alpha = 0.3f - layer * 0.08f;
+            
+            glColor4f(0.2f + unlockProgress * 0.5f, 1.0f, 0.2f + unlockProgress * 0.5f, alpha * unlockProgress);
+            
+            for (int i = 0; i < 8; i++) {
+                float angle1 = rotation + i * M_PI / 4;
+                float angle2 = rotation + (i + 0.5f) * M_PI / 4;
+                
+                glBegin(GL_TRIANGLES);
+                glVertex2f(40, 60);
+                glVertex2f(40 + radius * cos(angle1), 60 + radius * sin(angle1));
+                glVertex2f(40 + radius * cos(angle2), 60 + radius * sin(angle2));
+                glEnd();
+            }
+        }
+        
+        // Pulsing outer glow rings
+        float pulseSize = sin(doorAnimTime * 3.0f) * 5 + 50;
+        float pulseAlpha = (sin(doorAnimTime * 3.0f) * 0.3f + 0.5f) * unlockProgress;
+        
+        glColor4f(0.0f, 1.0f, 0.0f, pulseAlpha);
+        glBegin(GL_LINE_LOOP);
+        for (int i = 0; i < 20; i++) {
+            float angle = 2.0f * M_PI * i / 20;
+            glVertex2f(40 + pulseSize * cos(angle), 60 + pulseSize * sin(angle));
+        }
+        glEnd();
+        
+        glColor4f(0.0f, 1.0f, 0.5f, pulseAlpha * 0.6f);
+        glBegin(GL_LINE_LOOP);
+        for (int i = 0; i < 20; i++) {
+            float angle = 2.0f * M_PI * i / 20;
+            glVertex2f(40 + (pulseSize + 5) * cos(angle), 60 + (pulseSize + 5) * sin(angle));
+        }
+        glEnd();
+        
+        // Entrance animation - player being sucked in
+        if (doorIsEntering) {
+            // Bright flash effect
+            glColor4f(1.0f, 1.0f, 1.0f, (1.0f - enterProgress) * 0.7f);
+            glBegin(GL_POLYGON);
+            for (int i = 0; i < 12; i++) {
+                float angle = 2.0f * M_PI * i / 12;
+                float flashRadius = 60 * (1.0f - enterProgress);
+                glVertex2f(40 + flashRadius * cos(angle), 60 + flashRadius * sin(angle));
+            }
+            glEnd();
+            
+            // Spiraling particles being sucked in
+            for (int i = 0; i < 12; i++) {
+                float particleAngle = doorEnterAnimTime * 5.0f + i * M_PI / 6;
+                float particleRadius = 70 * (1.0f - enterProgress);
+                
+                glColor4f(1.0f, 1.0f, 0.0f, 1.0f - enterProgress);
+                glBegin(GL_POLYGON);
+                for (int j = 0; j < 6; j++) {
+                    float angle = 2.0f * M_PI * j / 6;
+                    glVertex2f(40 + particleRadius * cos(particleAngle) + 4 * cos(angle),
+                              60 + particleRadius * sin(particleAngle) + 4 * sin(angle));
+                }
+                glEnd();
+            }
+        }
+        
+        // Unlock animation - expanding energy waves
+        if (doorIsUnlocking && doorUnlockAnimTime < 2.0f) {
+            for (int wave = 0; wave < 3; wave++) {
+                float waveTime = doorUnlockAnimTime - wave * 0.3f;
+                if (waveTime > 0) {
+                    float waveRadius = waveTime * 50;
+                    float waveAlpha = std::max(0.0f, 1.0f - waveTime / 2.0f);
+                    
+                    glColor4f(1.0f, 1.0f, 0.0f, waveAlpha * 0.6f);
+                    glBegin(GL_LINE_LOOP);
+                    for (int i = 0; i < 24; i++) {
+                        float angle = 2.0f * M_PI * i / 24;
+                        glVertex2f(40 + waveRadius * cos(angle), 60 + waveRadius * sin(angle));
+                    }
+                    glEnd();
+                }
+            }
+        }
+        
+    } else {
+        // Locked door - ancient magical sealed door
+        // Stone archway frame (trapezoid)
+        glColor3f(0.4f, 0.4f, 0.5f);
+        glBegin(GL_QUADS);
+        glVertex2f(5, 0);
+        glVertex2f(75, 0);
+        glVertex2f(70, 110);
+        glVertex2f(10, 110);
+        glEnd();
+        
+        // Arch top (semi-circle)
+        glBegin(GL_POLYGON);
+        for (int i = 0; i <= 10; i++) {
+            float angle = M_PI * i / 10;
+            glVertex2f(40 + 30 * cos(angle), 110 + 30 * sin(angle));
+        }
+        glEnd();
+        
+        // Inner door surface (darker)
+        glColor3f(0.2f, 0.15f, 0.3f);
+        glBegin(GL_QUADS);
+        glVertex2f(15, 5);
+        glVertex2f(65, 5);
+        glVertex2f(62, 105);
+        glVertex2f(18, 105);
+        glEnd();
+        
+        // Door panels (rectangles)
+        glColor3f(0.25f, 0.2f, 0.35f);
+        glBegin(GL_QUADS);
+        glVertex2f(20, 10);
+        glVertex2f(35, 10);
+        glVertex2f(35, 50);
+        glVertex2f(20, 50);
+        glEnd();
+        
+        glBegin(GL_QUADS);
+        glVertex2f(45, 10);
+        glVertex2f(60, 10);
+        glVertex2f(60, 50);
+        glVertex2f(45, 50);
+        glEnd();
+        
+        glBegin(GL_QUADS);
+        glVertex2f(20, 60);
+        glVertex2f(35, 60);
+        glVertex2f(35, 100);
+        glVertex2f(20, 100);
+        glEnd();
+        
+        glBegin(GL_QUADS);
+        glVertex2f(45, 60);
+        glVertex2f(60, 60);
+        glVertex2f(60, 100);
+        glVertex2f(45, 100);
+        glEnd();
+        
+        // Mystical seal/lock in center (circle with runes)
+        glColor3f(0.6f, 0.3f, 0.8f); // Purple glow
+        glBegin(GL_POLYGON);
+        for (int i = 0; i < 16; i++) {
+            float angle = 2.0f * M_PI * i / 16;
+            glVertex2f(40 + 15 * cos(angle), 55 + 15 * sin(angle));
+        }
+        glEnd();
+        
+        // Inner seal
+        glColor3f(0.4f, 0.2f, 0.6f);
+        glBegin(GL_POLYGON);
+        for (int i = 0; i < 16; i++) {
+            float angle = 2.0f * M_PI * i / 16;
+            glVertex2f(40 + 10 * cos(angle), 55 + 10 * sin(angle));
+        }
+        glEnd();
+        
+        // Keyhole (star shape)
+        glColor3f(0.1f, 0.0f, 0.2f);
+        glBegin(GL_POLYGON);
+        for (int i = 0; i < 8; i++) {
+            float angle = 2.0f * M_PI * i / 8;
+            float radius = (i % 2 == 0) ? 6.0f : 3.0f;
+            glVertex2f(40 + radius * cos(angle), 55 + radius * sin(angle));
+        }
+        glEnd();
+        
+        // Pulsing magical chains/runes around door
+        float runeGlow = sin(doorAnimTime * 2.0f) * 0.3f + 0.5f;
+        glColor4f(0.8f, 0.3f, 1.0f, runeGlow);
+        
+        // Rune symbols (simple geometric shapes)
+        for (int i = 0; i < 4; i++) {
+            float runeX = (i % 2 == 0) ? 10 : 70;
+            float runeY = 30 + (i / 2) * 50;
+            
+            glBegin(GL_LINE_LOOP);
+            for (int j = 0; j < 3; j++) {
+                float angle = 2.0f * M_PI * j / 3 + doorAnimTime;
+                glVertex2f(runeX + 5 * cos(angle), runeY + 5 * sin(angle));
+            }
+            glEnd();
+        }
     }
     
     glPopMatrix();
@@ -1334,7 +1493,22 @@ void update(float deltaTime) {
             keyCollected = true;
             player.hasKey = true;
             score += 500;
+            // Start door unlock animation
+            doorIsUnlocking = true;
+            doorUnlockAnimTime = 0.0f;
         }
+    }
+    
+    // Update door animations
+    doorAnimTime += deltaTime; // Always update for constant effects
+    if (doorIsUnlocking) {
+        doorUnlockAnimTime += deltaTime;
+        if (doorUnlockAnimTime >= 2.0f) {
+            doorIsUnlocking = false; // Unlock animation complete
+        }
+    }
+    if (doorIsEntering) {
+        doorEnterAnimTime += deltaTime;
     }
     
     // Spawn power-ups - more frequently
@@ -1376,14 +1550,20 @@ void update(float deltaTime) {
     powerUps.erase(std::remove_if(powerUps.begin(), powerUps.end(),
                                  [](const PowerUp& p) { return !p.active; }), powerUps.end());
     
-    // Win condition
-    if (keyCollected) {
-        float doorX = WIDTH / 2 - 30;
-        float doorY = HEIGHT - 100;
+    // Win condition - player entering the door
+    if (keyCollected && !doorIsEntering) {
+        float doorX = WIDTH / 2 - 40;
+        float doorY = HEIGHT - 120;
         if (checkCollision(player.x, player.y, player.width, player.height,
-                         doorX, doorY, 60, 80)) {
-            gameState = GAME_WIN;
+                         doorX, doorY, 80, 120)) {
+            doorIsEntering = true;
+            doorEnterAnimTime = 0.0f;
         }
+    }
+    
+    // Complete win after entrance animation finishes
+    if (doorIsEntering && doorEnterAnimTime >= 1.5f) {
+        gameState = GAME_WIN;
     }
 }
 
