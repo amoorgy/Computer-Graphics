@@ -18,16 +18,45 @@ const int HEIGHT = 600;
 
 // Game states
 enum GameState {
+    START_MENU,
+    CHARACTER_SELECT,
     PLAYING,
     GAME_OVER,
     GAME_WIN
 };
 
+// Character types
+enum CharacterType {
+    WITCH,
+    FOOTBALLER,
+    BUSINESSMAN
+};
+
+// Menu states
+enum MenuSelection {
+    MENU_START,
+    MENU_CHARACTER,
+    MENU_EXIT
+};
+
+enum CharacterSelection {
+    CHAR_WITCH,
+    CHAR_FOOTBALLER,
+    CHAR_BUSINESSMAN,
+    CHAR_BACK
+};
+
 // Game variables
-GameState gameState = PLAYING;
+GameState gameState = START_MENU;
 int score = 0;
 int playerLives = 3;
 float gameTime = 0.0f;
+
+// Menu variables
+MenuSelection currentMenuSelection = MENU_START;
+CharacterSelection currentCharacterSelection = CHAR_WITCH;
+CharacterType selectedCharacter = WITCH;
+float menuAnimTime = 0.0f;
 
 // Player properties
 struct Player {
@@ -257,13 +286,105 @@ void drawBrickPanel(float x, float y, float width, float height, float r, float 
     glEnd();
 }
 
-// Draw player (4+ primitives: rectangle body, triangle head, circle hands, rectangle feet)
-void drawPlayer() {
+// Draw witch character (4+ primitives: dress, hat, hands, broomstick)
+void drawWitch(float x, float y, bool inMenu = false) {
     glPushMatrix();
-    glTranslatef(player.x, player.y, 0);
+    glTranslatef(x, y, 0);
+    if (inMenu) glScalef(2.0f, 2.0f, 1.0f); // Bigger in menu
     
-    // Shield effect if active
-    if (player.powerUpType == 1) {
+    // Shield effect if active (only in game)
+    if (!inMenu && player.powerUpType == 1) {
+        glColor3f(0.5f, 0.0f, 1.0f);
+        glBegin(GL_LINE_LOOP);
+        for (int i = 0; i < 20; i++) {
+            float angle = 2.0f * M_PI * i / 20;
+            glVertex2f(15 + 25 * cos(angle), 20 + 25 * sin(angle));
+        }
+        glEnd();
+    }
+    
+    // Dress (trapezoid using triangles)
+    glColor3f(0.2f, 0.0f, 0.4f); // Dark purple
+    glBegin(GL_TRIANGLES);
+    glVertex2f(15, 5);  // Top center
+    glVertex2f(5, 25);  // Bottom left
+    glVertex2f(25, 25); // Bottom right
+    glEnd();
+    
+    glBegin(GL_TRIANGLES);
+    glVertex2f(15, 5);  // Top center
+    glVertex2f(10, 5);  // Top left
+    glVertex2f(5, 25);  // Bottom left
+    glEnd();
+    
+    glBegin(GL_TRIANGLES);
+    glVertex2f(15, 5);  // Top center
+    glVertex2f(25, 25); // Bottom right
+    glVertex2f(20, 5);  // Top right
+    glEnd();
+    
+    // Witch hat (triangle)
+    glColor3f(0.1f, 0.0f, 0.2f);
+    glBegin(GL_TRIANGLES);
+    glVertex2f(15, 45); // Top
+    glVertex2f(8, 25);  // Left
+    glVertex2f(22, 25); // Right
+    glEnd();
+    
+    // Hat brim (rectangle)
+    glBegin(GL_QUADS);
+    glVertex2f(6, 25);
+    glVertex2f(24, 25);
+    glVertex2f(24, 28);
+    glVertex2f(6, 28);
+    glEnd();
+    
+    // Hands (circles)
+    glColor3f(0.8f, 0.6f, 0.4f);
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 12; i++) {
+        float angle = 2.0f * M_PI * i / 12;
+        glVertex2f(-2 + 3 * cos(angle), 15 + 3 * sin(angle));
+    }
+    glEnd();
+    
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 12; i++) {
+        float angle = 2.0f * M_PI * i / 12;
+        glVertex2f(32 + 3 * cos(angle), 15 + 3 * sin(angle));
+    }
+    glEnd();
+    
+    // Broomstick (rectangle)
+    glColor3f(0.6f, 0.3f, 0.1f);
+    glBegin(GL_QUADS);
+    glVertex2f(30, 12);
+    glVertex2f(45, 10);
+    glVertex2f(45, 14);
+    glVertex2f(30, 16);
+    glEnd();
+    
+    // Broom bristles (triangles)
+    glColor3f(0.8f, 0.7f, 0.3f);
+    for (int i = 0; i < 3; i++) {
+        glBegin(GL_TRIANGLES);
+        glVertex2f(45, 8 + i * 3);
+        glVertex2f(52, 6 + i * 4);
+        glVertex2f(45, 10 + i * 3);
+        glEnd();
+    }
+    
+    glPopMatrix();
+}
+
+// Draw footballer character (4+ primitives: jersey, shorts, boots, ball)
+void drawFootballer(float x, float y, bool inMenu = false) {
+    glPushMatrix();
+    glTranslatef(x, y, 0);
+    if (inMenu) glScalef(2.0f, 2.0f, 1.0f);
+    
+    // Shield effect if active (only in game)
+    if (!inMenu && player.powerUpType == 1) {
         glColor3f(0.0f, 1.0f, 1.0f);
         glBegin(GL_LINE_LOOP);
         for (int i = 0; i < 20; i++) {
@@ -273,56 +394,224 @@ void drawPlayer() {
         glEnd();
     }
     
-    // Body (rectangle)
-    glColor3f(0.2f, 0.6f, 1.0f);
+    // Jersey (rectangle)
+    glColor3f(0.0f, 0.8f, 0.0f); // Green jersey
     glBegin(GL_QUADS);
-    glVertex2f(5, 5);
-    glVertex2f(25, 5);
-    glVertex2f(25, 30);
-    glVertex2f(5, 30);
+    glVertex2f(8, 15);
+    glVertex2f(22, 15);
+    glVertex2f(22, 28);
+    glVertex2f(8, 28);
     glEnd();
     
-    // Head (triangle)
-    glColor3f(1.0f, 0.8f, 0.6f);
-    glBegin(GL_TRIANGLES);
-    glVertex2f(15, 40);
-    glVertex2f(10, 30);
-    glVertex2f(20, 30);
+    // Jersey number (rectangle)
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glBegin(GL_QUADS);
+    glVertex2f(12, 20);
+    glVertex2f(18, 20);
+    glVertex2f(18, 25);
+    glVertex2f(12, 25);
     glEnd();
     
-    // Hands (circles)
+    // Shorts (rectangle)
+    glColor3f(0.0f, 0.0f, 0.8f); // Blue shorts
+    glBegin(GL_QUADS);
+    glVertex2f(9, 8);
+    glVertex2f(21, 8);
+    glVertex2f(21, 15);
+    glVertex2f(9, 15);
+    glEnd();
+    
+    // Head (circle)
     glColor3f(1.0f, 0.8f, 0.6f);
     glBegin(GL_POLYGON);
-    for (int i = 0; i < 12; i++) {
-        float angle = 2.0f * M_PI * i / 12;
-        glVertex2f(0 + 4 * cos(angle), 20 + 4 * sin(angle));
+    for (int i = 0; i < 16; i++) {
+        float angle = 2.0f * M_PI * i / 16;
+        glVertex2f(15 + 6 * cos(angle), 34 + 6 * sin(angle));
     }
     glEnd();
     
-    glBegin(GL_POLYGON);
-    for (int i = 0; i < 12; i++) {
-        float angle = 2.0f * M_PI * i / 12;
-        glVertex2f(30 + 4 * cos(angle), 20 + 4 * sin(angle));
+    // Arms (rectangles)
+    glColor3f(1.0f, 0.8f, 0.6f);
+    glBegin(GL_QUADS);
+    glVertex2f(4, 20);
+    glVertex2f(8, 20);
+    glVertex2f(8, 26);
+    glVertex2f(4, 26);
+    glEnd();
+    
+    glBegin(GL_QUADS);
+    glVertex2f(22, 20);
+    glVertex2f(26, 20);
+    glVertex2f(26, 26);
+    glVertex2f(22, 26);
+    glEnd();
+    
+    // Football boots (rectangles)
+    glColor3f(0.0f, 0.0f, 0.0f);
+    glBegin(GL_QUADS);
+    glVertex2f(8, 0);
+    glVertex2f(14, 0);
+    glVertex2f(14, 8);
+    glVertex2f(8, 8);
+    glEnd();
+    
+    glBegin(GL_QUADS);
+    glVertex2f(16, 0);
+    glVertex2f(22, 0);
+    glVertex2f(22, 8);
+    glVertex2f(16, 8);
+    glEnd();
+    
+    // Football (circle)
+    if (inMenu) {
+        glColor3f(1.0f, 1.0f, 1.0f);
+        glBegin(GL_POLYGON);
+        for (int i = 0; i < 12; i++) {
+            float angle = 2.0f * M_PI * i / 12;
+            glVertex2f(35 + 6 * cos(angle), 15 + 6 * sin(angle));
+        }
+        glEnd();
+        
+        // Football pattern (lines)
+        glColor3f(0.0f, 0.0f, 0.0f);
+        glBegin(GL_LINES);
+        glVertex2f(32, 15); glVertex2f(38, 15);
+        glVertex2f(35, 12); glVertex2f(35, 18);
+        glEnd();
     }
-    glEnd();
-    
-    // Feet (rectangles)
-    glColor3f(0.4f, 0.2f, 0.0f);
-    glBegin(GL_QUADS);
-    glVertex2f(2, 0);
-    glVertex2f(12, 0);
-    glVertex2f(12, 5);
-    glVertex2f(2, 5);
-    glEnd();
-    
-    glBegin(GL_QUADS);
-    glVertex2f(18, 0);
-    glVertex2f(28, 0);
-    glVertex2f(28, 5);
-    glVertex2f(18, 5);
-    glEnd();
     
     glPopMatrix();
+}
+
+// Draw businessman character (4+ primitives: suit jacket, tie, briefcase, dress shoes)
+void drawBusinessman(float x, float y, bool inMenu = false) {
+    glPushMatrix();
+    glTranslatef(x, y, 0);
+    if (inMenu) glScalef(2.0f, 2.0f, 1.0f);
+    
+    // Shield effect if active (only in game)
+    if (!inMenu && player.powerUpType == 1) {
+        glColor3f(0.0f, 1.0f, 1.0f);
+        glBegin(GL_LINE_LOOP);
+        for (int i = 0; i < 20; i++) {
+            float angle = 2.0f * M_PI * i / 20;
+            glVertex2f(15 + 25 * cos(angle), 20 + 25 * sin(angle));
+        }
+        glEnd();
+    }
+    
+    // Suit jacket (rectangle)
+    glColor3f(0.2f, 0.2f, 0.2f); // Dark gray suit
+    glBegin(GL_QUADS);
+    glVertex2f(7, 10);
+    glVertex2f(23, 10);
+    glVertex2f(23, 28);
+    glVertex2f(7, 28);
+    glEnd();
+    
+    // Shirt (rectangle)
+    glColor3f(1.0f, 1.0f, 1.0f);
+    glBegin(GL_QUADS);
+    glVertex2f(11, 15);
+    glVertex2f(19, 15);
+    glVertex2f(19, 28);
+    glVertex2f(11, 28);
+    glEnd();
+    
+    // Tie (triangle)
+    glColor3f(0.8f, 0.0f, 0.0f); // Red tie
+    glBegin(GL_TRIANGLES);
+    glVertex2f(15, 28);
+    glVertex2f(13, 18);
+    glVertex2f(17, 18);
+    glEnd();
+    
+    // Suit pants (rectangle)
+    glColor3f(0.2f, 0.2f, 0.2f);
+    glBegin(GL_QUADS);
+    glVertex2f(9, 2);
+    glVertex2f(21, 2);
+    glVertex2f(21, 10);
+    glVertex2f(9, 10);
+    glEnd();
+    
+    // Head (circle)
+    glColor3f(1.0f, 0.8f, 0.6f);
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 16; i++) {
+        float angle = 2.0f * M_PI * i / 16;
+        glVertex2f(15 + 6 * cos(angle), 34 + 6 * sin(angle));
+    }
+    glEnd();
+    
+    // Arms (rectangles)
+    glColor3f(0.2f, 0.2f, 0.2f);
+    glBegin(GL_QUADS);
+    glVertex2f(3, 18);
+    glVertex2f(7, 18);
+    glVertex2f(7, 26);
+    glVertex2f(3, 26);
+    glEnd();
+    
+    glBegin(GL_QUADS);
+    glVertex2f(23, 18);
+    glVertex2f(27, 18);
+    glVertex2f(27, 26);
+    glVertex2f(23, 26);
+    glEnd();
+    
+    // Dress shoes (rectangles)
+    glColor3f(0.1f, 0.1f, 0.1f);
+    glBegin(GL_QUADS);
+    glVertex2f(8, 0);
+    glVertex2f(14, 0);
+    glVertex2f(14, 4);
+    glVertex2f(8, 4);
+    glEnd();
+    
+    glBegin(GL_QUADS);
+    glVertex2f(16, 0);
+    glVertex2f(22, 0);
+    glVertex2f(22, 4);
+    glVertex2f(16, 4);
+    glEnd();
+    
+    // Briefcase (rectangle)
+    if (inMenu) {
+        glColor3f(0.4f, 0.2f, 0.0f);
+        glBegin(GL_QUADS);
+        glVertex2f(30, 12);
+        glVertex2f(42, 12);
+        glVertex2f(42, 20);
+        glVertex2f(30, 20);
+        glEnd();
+        
+        // Briefcase handle (rectangle)
+        glColor3f(0.2f, 0.1f, 0.0f);
+        glBegin(GL_QUADS);
+        glVertex2f(34, 20);
+        glVertex2f(38, 20);
+        glVertex2f(38, 22);
+        glVertex2f(34, 22);
+        glEnd();
+    }
+    
+    glPopMatrix();
+}
+
+// Draw player based on selected character
+void drawPlayer() {
+    switch (selectedCharacter) {
+        case WITCH:
+            drawWitch(player.x, player.y, false);
+            break;
+        case FOOTBALLER:
+            drawFootballer(player.x, player.y, false);
+            break;
+        case BUSINESSMAN:
+            drawBusinessman(player.x, player.y, false);
+            break;
+    }
 }
 
 // Draw platforms (3+ primitives: rectangle base, triangle decoration, line borders)
@@ -1102,19 +1391,56 @@ void update(float deltaTime) {
 void keyboard(unsigned char key, int x, int y) {
     switch (key) {
         case 27: // ESC
-            exit(0);
+            if (gameState == START_MENU) {
+                exit(0);
+            } else {
+                gameState = START_MENU;
+            }
+            break;
+        case 13: // ENTER
+            if (gameState == START_MENU) {
+                switch (currentMenuSelection) {
+                    case MENU_START:
+                        gameState = PLAYING;
+                        score = 0;
+                        playerLives = 3;
+                        gameTime = 0;
+                        lavaHeight = 50;
+                        keySpawned = false;
+                        keyCollected = false;
+                        initGame();
+                        break;
+                    case MENU_CHARACTER:
+                        gameState = CHARACTER_SELECT;
+                        break;
+                    case MENU_EXIT:
+                        exit(0);
+                        break;
+                }
+            } else if (gameState == CHARACTER_SELECT) {
+                switch (currentCharacterSelection) {
+                    case CHAR_WITCH:
+                        selectedCharacter = WITCH;
+                        gameState = START_MENU;
+                        break;
+                    case CHAR_FOOTBALLER:
+                        selectedCharacter = FOOTBALLER;
+                        gameState = START_MENU;
+                        break;
+                    case CHAR_BUSINESSMAN:
+                        selectedCharacter = BUSINESSMAN;
+                        gameState = START_MENU;
+                        break;
+                    case CHAR_BACK:
+                        gameState = START_MENU;
+                        break;
+                }
+            }
             break;
         case 'r':
         case 'R':
-            if (gameState != PLAYING) {
-                gameState = PLAYING;
-                score = 0;
-                playerLives = 3;
-                gameTime = 0;
-                lavaHeight = 50;
-                keySpawned = false;
-                keyCollected = false;
-                initGame();
+            if (gameState == GAME_OVER || gameState == GAME_WIN) {
+                gameState = START_MENU;
             }
             break;
         case 'w':
@@ -1138,24 +1464,42 @@ void keyboardUp(unsigned char key, int x, int y) {
 }
 
 void specialKey(int key, int x, int y) {
-    if (gameState != PLAYING) return;
-    
-    switch (key) {
-        case GLUT_KEY_LEFT:
-            player.velocityX = -250; // Faster movement
-            break;
-        case GLUT_KEY_RIGHT:
-            player.velocityX = 250; // Faster movement
-            break;
-        case GLUT_KEY_UP:
-            if (player.onGround) {
-                player.velocityY = 430; // Balanced jump
-                player.onGround = false;
-            } else if (player.canDoubleJump && !player.hasDoubleJumped) {
-                player.velocityY = 330; // Balanced double jump
-                player.hasDoubleJumped = true;
-            }
-            break;
+    if (gameState == START_MENU) {
+        switch (key) {
+            case GLUT_KEY_UP:
+                currentMenuSelection = (MenuSelection)((currentMenuSelection - 1 + 3) % 3);
+                break;
+            case GLUT_KEY_DOWN:
+                currentMenuSelection = (MenuSelection)((currentMenuSelection + 1) % 3);
+                break;
+        }
+    } else if (gameState == CHARACTER_SELECT) {
+        switch (key) {
+            case GLUT_KEY_LEFT:
+                currentCharacterSelection = (CharacterSelection)((currentCharacterSelection - 1 + 4) % 4);
+                break;
+            case GLUT_KEY_RIGHT:
+                currentCharacterSelection = (CharacterSelection)((currentCharacterSelection + 1) % 4);
+                break;
+        }
+    } else if (gameState == PLAYING) {
+        switch (key) {
+            case GLUT_KEY_LEFT:
+                player.velocityX = -250; // Faster movement
+                break;
+            case GLUT_KEY_RIGHT:
+                player.velocityX = 250; // Faster movement
+                break;
+            case GLUT_KEY_UP:
+                if (player.onGround) {
+                    player.velocityY = 430; // Balanced jump
+                    player.onGround = false;
+                } else if (player.canDoubleJump && !player.hasDoubleJumped) {
+                    player.velocityY = 330; // Balanced double jump
+                    player.hasDoubleJumped = true;
+                }
+                break;
+        }
     }
 }
 
@@ -1170,17 +1514,41 @@ void specialKeyUp(int key, int x, int y) {
     }
 }
 
-// Draw brick background
-void drawBrickBackground() {
-    // Draw brick pattern background
-    glColor3f(0.3f, 0.35f, 0.5f); // Base brick color
+// Draw background with depth layers
+void drawLayeredBackground() {
+    // Back layer - darker, blurred effect
+    glColor3f(0.15f, 0.2f, 0.3f);
+    int backBrickWidth = 80;
+    int backBrickHeight = 25;
     
+    for (int y = 0; y < HEIGHT; y += backBrickHeight) {
+        for (int x = 0; x < WIDTH; x += backBrickWidth) {
+            int offsetX = (y / backBrickHeight) % 2 == 0 ? 0 : backBrickWidth / 2;
+            int brickX = x + offsetX;
+            
+            if (brickX >= WIDTH) continue;
+            int actualWidth = std::min(backBrickWidth, WIDTH - brickX);
+            
+            // Very subtle color variation
+            float colorVar = 0.02f * (rand() % 10 - 5) / 5.0f;
+            glColor3f(0.15f + colorVar, 0.2f + colorVar, 0.3f + colorVar);
+            
+            glBegin(GL_QUADS);
+            glVertex2f(brickX, y);
+            glVertex2f(brickX + actualWidth - 3, y);
+            glVertex2f(brickX + actualWidth - 3, y + backBrickHeight - 3);
+            glVertex2f(brickX, y + backBrickHeight - 3);
+            glEnd();
+        }
+    }
+    
+    // Front layer - main brick pattern
+    glColor3f(0.3f, 0.35f, 0.5f);
     int brickWidth = 60;
     int brickHeight = 20;
     
     for (int y = 0; y < HEIGHT; y += brickHeight) {
         for (int x = 0; x < WIDTH; x += brickWidth) {
-            // Alternate brick offset for realistic pattern
             int offsetX = (y / brickHeight) % 2 == 0 ? 0 : brickWidth / 2;
             int brickX = x + offsetX;
             
@@ -1194,7 +1562,7 @@ void drawBrickBackground() {
             // Draw brick
             glBegin(GL_QUADS);
             glVertex2f(brickX, y);
-            glVertex2f(brickX + actualWidth - 2, y); // -2 for mortar gap
+            glVertex2f(brickX + actualWidth - 2, y);
             glVertex2f(brickX + actualWidth - 2, y + brickHeight - 2);
             glVertex2f(brickX, y + brickHeight - 2);
             glEnd();
@@ -1213,14 +1581,136 @@ void drawBrickBackground() {
     }
 }
 
+// Draw start menu
+void drawStartMenu() {
+    // Title panel
+    drawBrickPanel(WIDTH / 2 - 200, HEIGHT - 150, 400, 60, 0.8f, 0.6f, 0.2f);
+    
+    glColor3f(1.0f, 1.0f, 1.0f);
+    drawText(WIDTH / 2 - 80, HEIGHT - 120, "ICY TOWER ADVENTURE");
+    
+    // Menu options with selection highlighting
+    float menuY = HEIGHT / 2 + 50;
+    float spacing = 60;
+    
+    // Start Game
+    if (currentMenuSelection == MENU_START) {
+        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.2f, 0.8f, 0.2f);
+        glColor3f(1.0f, 1.0f, 0.0f);
+    } else {
+        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.5f, 0.5f, 0.5f);
+        glColor3f(0.8f, 0.8f, 0.8f);
+    }
+    drawText(WIDTH / 2 - 50, menuY + 10, "START GAME");
+    
+    // Character Select
+    menuY -= spacing;
+    if (currentMenuSelection == MENU_CHARACTER) {
+        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.2f, 0.8f, 0.2f);
+        glColor3f(1.0f, 1.0f, 0.0f);
+    } else {
+        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.5f, 0.5f, 0.5f);
+        glColor3f(0.8f, 0.8f, 0.8f);
+    }
+    drawText(WIDTH / 2 - 70, menuY + 10, "SELECT CHARACTER");
+    
+    // Exit
+    menuY -= spacing;
+    if (currentMenuSelection == MENU_EXIT) {
+        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.8f, 0.2f, 0.2f);
+        glColor3f(1.0f, 1.0f, 0.0f);
+    } else {
+        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.5f, 0.5f, 0.5f);
+        glColor3f(0.8f, 0.8f, 0.8f);
+    }
+    drawText(WIDTH / 2 - 25, menuY + 10, "EXIT");
+    
+    // Instructions
+    drawBrickPanel(50, 50, WIDTH - 100, 40, 0.4f, 0.4f, 0.6f);
+    glColor3f(0.9f, 0.9f, 0.9f);
+    drawText(60, 75, "Use UP/DOWN arrows to navigate, ENTER to select");
+}
+
+// Draw character selection menu
+void drawCharacterSelect() {
+    // Title panel
+    drawBrickPanel(WIDTH / 2 - 150, HEIGHT - 100, 300, 40, 0.8f, 0.6f, 0.2f);
+    glColor3f(1.0f, 1.0f, 1.0f);
+    drawText(WIDTH / 2 - 80, HEIGHT - 75, "CHOOSE CHARACTER");
+    
+    // Character displays
+    float charY = HEIGHT / 2;
+    float charSpacing = 200;
+    float startX = WIDTH / 2 - charSpacing;
+    
+    // Witch
+    if (currentCharacterSelection == CHAR_WITCH) {
+        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.4f, 0.2f, 0.8f);
+        glColor3f(1.0f, 1.0f, 0.0f);
+        drawText(startX - 25, charY - 100, "WITCH");
+    } else {
+        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.3f, 0.3f, 0.3f);
+        glColor3f(0.7f, 0.7f, 0.7f);
+        drawText(startX - 25, charY - 100, "WITCH");
+    }
+    drawWitch(startX - 30, charY - 60, true);
+    
+    // Footballer
+    startX += charSpacing;
+    if (currentCharacterSelection == CHAR_FOOTBALLER) {
+        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.2f, 0.8f, 0.2f);
+        glColor3f(1.0f, 1.0f, 0.0f);
+        drawText(startX - 50, charY - 100, "FOOTBALLER");
+    } else {
+        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.3f, 0.3f, 0.3f);
+        glColor3f(0.7f, 0.7f, 0.7f);
+        drawText(startX - 50, charY - 100, "FOOTBALLER");
+    }
+    drawFootballer(startX - 30, charY - 60, true);
+    
+    // Businessman
+    startX += charSpacing;
+    if (currentCharacterSelection == CHAR_BUSINESSMAN) {
+        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.6f, 0.6f, 0.2f);
+        glColor3f(1.0f, 1.0f, 0.0f);
+        drawText(startX - 60, charY - 100, "BUSINESSMAN");
+    } else {
+        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.3f, 0.3f, 0.3f);
+        glColor3f(0.7f, 0.7f, 0.7f);
+        drawText(startX - 60, charY - 100, "BUSINESSMAN");
+    }
+    drawBusinessman(startX - 30, charY - 60, true);
+    
+    // Back option
+    if (currentCharacterSelection == CHAR_BACK) {
+        drawBrickPanel(WIDTH / 2 - 50, 100, 100, 30, 0.8f, 0.2f, 0.2f);
+        glColor3f(1.0f, 1.0f, 0.0f);
+    } else {
+        drawBrickPanel(WIDTH / 2 - 50, 100, 100, 30, 0.5f, 0.5f, 0.5f);
+        glColor3f(0.8f, 0.8f, 0.8f);
+    }
+    drawText(WIDTH / 2 - 20, 120, "BACK");
+    
+    // Instructions
+    drawBrickPanel(50, 20, WIDTH - 100, 30, 0.4f, 0.4f, 0.6f);
+    glColor3f(0.9f, 0.9f, 0.9f);
+    drawText(60, 40, "Use LEFT/RIGHT arrows to select, ENTER to confirm");
+}
+
 
 // Display function
 void display() {
     glClear(GL_COLOR_BUFFER_BIT);
     glLoadIdentity();
     
-    if (gameState == PLAYING) {
-        drawBrickBackground();
+    if (gameState == START_MENU) {
+        drawLayeredBackground();
+        drawStartMenu();
+    } else if (gameState == CHARACTER_SELECT) {
+        drawLayeredBackground();
+        drawCharacterSelect();
+    } else if (gameState == PLAYING) {
+        drawLayeredBackground();
         drawLava();
         drawPlatforms();
         drawCollectables();
@@ -1231,10 +1721,10 @@ void display() {
         drawDoor();
         drawHUD();
     } else if (gameState == GAME_OVER) {
-        drawBrickBackground();
+        drawLayeredBackground();
         drawGameOver();
     } else if (gameState == GAME_WIN) {
-        drawBrickBackground();
+        drawLayeredBackground();
         drawGameWin();
     }
     
@@ -1248,7 +1738,13 @@ void timer(int value) {
     float deltaTime = (currentTime - lastTime) / 1000.0f;
     lastTime = currentTime;
     
-    update(deltaTime);
+    if (gameState == PLAYING) {
+        update(deltaTime);
+    } else {
+        // Update menu animations
+        menuAnimTime += deltaTime;
+    }
+    
     glutPostRedisplay();
     glutTimerFunc(16, timer, 0); // ~60 FPS
 }
