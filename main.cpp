@@ -1514,71 +1514,177 @@ void specialKeyUp(int key, int x, int y) {
     }
 }
 
-// Draw background with depth layers
+// Particle structure for floating elements
+struct BackgroundParticle {
+    float x, y;
+    float size;
+    float speed;
+    float alpha;
+};
+
+std::vector<BackgroundParticle> bgParticles;
+float bgAnimTime = 0.0f;
+
+// Initialize background particles
+void initBackgroundParticles() {
+    bgParticles.clear();
+    for (int i = 0; i < 50; i++) {
+        BackgroundParticle p;
+        p.x = rand() % WIDTH;
+        p.y = rand() % HEIGHT;
+        p.size = 2 + rand() % 4;
+        p.speed = 5 + rand() % 15;
+        p.alpha = 0.3f + (rand() % 50) / 100.0f;
+        bgParticles.push_back(p);
+    }
+}
+
+// Draw epic animated parallax background
 void drawLayeredBackground() {
-    // Back layer - darker, blurred effect
-    glColor3f(0.15f, 0.2f, 0.3f);
-    int backBrickWidth = 80;
-    int backBrickHeight = 25;
+    // Initialize particles if empty
+    if (bgParticles.empty()) {
+        initBackgroundParticles();
+    }
     
-    for (int y = 0; y < HEIGHT; y += backBrickHeight) {
-        for (int x = 0; x < WIDTH; x += backBrickWidth) {
-            int offsetX = (y / backBrickHeight) % 2 == 0 ? 0 : backBrickWidth / 2;
-            int brickX = x + offsetX;
+    // Dynamic gradient sky with color transition
+    float colorCycle = sin(bgAnimTime * 0.3f) * 0.5f + 0.5f;
+    
+    // Draw gradient background from top to bottom
+    glBegin(GL_QUADS);
+    // Top colors - shifting between purple-blue and orange-pink
+    glColor3f(0.1f + colorCycle * 0.3f, 0.05f + colorCycle * 0.2f, 0.3f + colorCycle * 0.4f);
+    glVertex2f(0, HEIGHT);
+    glVertex2f(WIDTH, HEIGHT);
+    
+    // Middle colors
+    glColor3f(0.2f + colorCycle * 0.4f, 0.15f + colorCycle * 0.3f, 0.4f);
+    glVertex2f(WIDTH, HEIGHT / 2);
+    glVertex2f(0, HEIGHT / 2);
+    glEnd();
+    
+    glBegin(GL_QUADS);
+    // Middle to bottom transition
+    glColor3f(0.2f + colorCycle * 0.4f, 0.15f + colorCycle * 0.3f, 0.4f);
+    glVertex2f(0, HEIGHT / 2);
+    glVertex2f(WIDTH, HEIGHT / 2);
+    
+    // Bottom colors - darker
+    glColor3f(0.15f, 0.1f, 0.25f);
+    glVertex2f(WIDTH, 0);
+    glVertex2f(0, 0);
+    glEnd();
+    
+    // Back layer - distant floating clouds (slowest)
+    float backCloudOffset = fmod(bgAnimTime * 8.0f, WIDTH + 200);
+    glColor4f(0.2f, 0.15f, 0.35f, 0.3f); // Semi-transparent for blur effect
+    
+    for (int i = 0; i < 3; i++) {
+        float cloudX = backCloudOffset + i * 300 - 200;
+        if (cloudX > WIDTH) cloudX -= WIDTH + 400;
+        float cloudY = HEIGHT * 0.7f + sin(bgAnimTime + i) * 20;
+        
+        // Draw cloud as series of overlapping circles
+        for (int j = 0; j < 4; j++) {
+            float offsetX = j * 25 - 37.5f;
+            float radius = 30 + j * 5;
             
-            if (brickX >= WIDTH) continue;
-            int actualWidth = std::min(backBrickWidth, WIDTH - brickX);
-            
-            // Very subtle color variation
-            float colorVar = 0.02f * (rand() % 10 - 5) / 5.0f;
-            glColor3f(0.15f + colorVar, 0.2f + colorVar, 0.3f + colorVar);
-            
-            glBegin(GL_QUADS);
-            glVertex2f(brickX, y);
-            glVertex2f(brickX + actualWidth - 3, y);
-            glVertex2f(brickX + actualWidth - 3, y + backBrickHeight - 3);
-            glVertex2f(brickX, y + backBrickHeight - 3);
+            glBegin(GL_POLYGON);
+            for (int k = 0; k < 20; k++) {
+                float angle = 2.0f * M_PI * k / 20;
+                glVertex2f(cloudX + offsetX + radius * cos(angle), 
+                          cloudY + radius * sin(angle));
+            }
             glEnd();
         }
     }
     
-    // Front layer - main brick pattern
-    glColor3f(0.3f, 0.35f, 0.5f);
-    int brickWidth = 60;
-    int brickHeight = 20;
+    // Middle layer - medium clouds (medium speed)
+    float midCloudOffset = fmod(bgAnimTime * 15.0f, WIDTH + 200);
+    glColor4f(0.25f, 0.2f, 0.4f, 0.4f);
     
-    for (int y = 0; y < HEIGHT; y += brickHeight) {
-        for (int x = 0; x < WIDTH; x += brickWidth) {
-            int offsetX = (y / brickHeight) % 2 == 0 ? 0 : brickWidth / 2;
-            int brickX = x + offsetX;
+    for (int i = 0; i < 4; i++) {
+        float cloudX = midCloudOffset + i * 250 - 200;
+        if (cloudX > WIDTH) cloudX -= WIDTH + 400;
+        float cloudY = HEIGHT * 0.5f + sin(bgAnimTime * 1.5f + i) * 15;
+        
+        for (int j = 0; j < 3; j++) {
+            float offsetX = j * 20 - 30;
+            float radius = 25 + j * 4;
             
-            if (brickX >= WIDTH) continue;
-            int actualWidth = std::min(brickWidth, WIDTH - brickX);
-            
-            // Slightly varied brick colors
-            float colorVar = 0.05f * (rand() % 10 - 5) / 5.0f;
-            glColor3f(0.3f + colorVar, 0.35f + colorVar, 0.5f + colorVar);
-            
-            // Draw brick
-            glBegin(GL_QUADS);
-            glVertex2f(brickX, y);
-            glVertex2f(brickX + actualWidth - 2, y);
-            glVertex2f(brickX + actualWidth - 2, y + brickHeight - 2);
-            glVertex2f(brickX, y + brickHeight - 2);
-            glEnd();
-            
-            // Draw mortar lines
-            glColor3f(0.2f, 0.25f, 0.35f);
-            glBegin(GL_LINES);
-            // Horizontal mortar
-            glVertex2f(brickX, y + brickHeight - 1);
-            glVertex2f(brickX + actualWidth, y + brickHeight - 1);
-            // Vertical mortar
-            glVertex2f(brickX + actualWidth - 1, y);
-            glVertex2f(brickX + actualWidth - 1, y + brickHeight);
+            glBegin(GL_POLYGON);
+            for (int k = 0; k < 20; k++) {
+                float angle = 2.0f * M_PI * k / 20;
+                glVertex2f(cloudX + offsetX + radius * cos(angle), 
+                          cloudY + radius * sin(angle));
+            }
             glEnd();
         }
     }
+    
+    // Front layer - near clouds (fastest)
+    float frontCloudOffset = fmod(bgAnimTime * 25.0f, WIDTH + 200);
+    glColor4f(0.3f, 0.25f, 0.45f, 0.5f);
+    
+    for (int i = 0; i < 5; i++) {
+        float cloudX = frontCloudOffset + i * 200 - 200;
+        if (cloudX > WIDTH) cloudX -= WIDTH + 400;
+        float cloudY = HEIGHT * 0.3f + sin(bgAnimTime * 2.0f + i) * 10;
+        
+        for (int j = 0; j < 3; j++) {
+            float offsetX = j * 18 - 27;
+            float radius = 20 + j * 3;
+            
+            glBegin(GL_POLYGON);
+            for (int k = 0; k < 16; k++) {
+                float angle = 2.0f * M_PI * k / 16;
+                glVertex2f(cloudX + offsetX + radius * cos(angle), 
+                          cloudY + radius * sin(angle));
+            }
+            glEnd();
+        }
+    }
+    
+    // Floating particles/stars for atmosphere
+    for (auto& particle : bgParticles) {
+        // Update particle position
+        particle.y += particle.speed * 0.016f; // Assuming ~60fps
+        if (particle.y > HEIGHT + 10) {
+            particle.y = -10;
+            particle.x = rand() % WIDTH;
+        }
+        
+        // Draw particle with glow effect
+        float pulse = sin(bgAnimTime * 2.0f + particle.x) * 0.3f + 0.7f;
+        glColor4f(1.0f, 0.9f, 0.6f, particle.alpha * pulse);
+        
+        // Draw as a small glowing circle
+        glBegin(GL_POLYGON);
+        for (int i = 0; i < 8; i++) {
+            float angle = 2.0f * M_PI * i / 8;
+            glVertex2f(particle.x + particle.size * cos(angle), 
+                      particle.y + particle.size * sin(angle));
+        }
+        glEnd();
+        
+        // Draw outer glow
+        glColor4f(1.0f, 0.9f, 0.6f, particle.alpha * pulse * 0.3f);
+        glBegin(GL_POLYGON);
+        for (int i = 0; i < 8; i++) {
+            float angle = 2.0f * M_PI * i / 8;
+            glVertex2f(particle.x + (particle.size + 2) * cos(angle), 
+                      particle.y + (particle.size + 2) * sin(angle));
+        }
+        glEnd();
+    }
+    
+    // Semi-transparent overlay for depth blur effect
+    glColor4f(0.05f, 0.05f, 0.1f, 0.15f);
+    glBegin(GL_QUADS);
+    glVertex2f(0, 0);
+    glVertex2f(WIDTH, 0);
+    glVertex2f(WIDTH, HEIGHT);
+    glVertex2f(0, HEIGHT);
+    glEnd();
 }
 
 // Draw start menu
@@ -1738,6 +1844,9 @@ void timer(int value) {
     float deltaTime = (currentTime - lastTime) / 1000.0f;
     lastTime = currentTime;
     
+    // Always update background animation
+    bgAnimTime += deltaTime;
+    
     if (gameState == PLAYING) {
         update(deltaTime);
     } else {
@@ -1760,11 +1869,11 @@ void reshape(int width, int height) {
 
 int main(int argc, char** argv) {
     glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA); // RGBA for alpha blending
     glutInitWindowSize(WIDTH, HEIGHT);
     glutCreateWindow("Icy Tower - Computer Graphics Assignment");
     
-    glClearColor(0.5f, 0.8f, 1.0f, 1.0f); // Sky blue background
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // Black background
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     
