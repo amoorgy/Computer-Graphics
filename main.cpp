@@ -757,40 +757,68 @@ void drawRocks() {
     }
 }
 
-// Draw collectables (3+ primitives: circle base, triangle sparkle, line rays)
+// Draw collectables with 3D-like X-axis rotation illusion
 void drawCollectables() {
     for (const auto& collectable : collectables) {
         if (collectable.collected) continue;
         
         glPushMatrix();
         glTranslatef(collectable.x, collectable.y, 0);
-        glRotatef(collectable.animTime * 100, 0, 0, 1);
         
-        // Coin base (circle)
-        glColor3f(1.0f, 0.8f, 0.0f);
+        // X-axis flip illusion using Y-scale squash and overall size modulation
+        float t = (sinf(collectable.animTime * 4.0f) + 1.0f) * 0.5f; // 0..1
+        float yScale = 0.25f + 0.75f * t; // Thin at edge, full when face-on
+        float overall = 0.8f + 0.4f * t;  // Larger when face-on
+        glScalef(overall, overall * yScale, 1.0f);
+        
+        // Subtle wobble around Z to add life
+        glRotatef(sinf(collectable.animTime * 2.0f) * 8.0f, 0, 0, 1);
+        
+        // Base coin (ellipse due to Y scaling)
+        glColor3f(1.0f, 0.82f, 0.1f);
         glBegin(GL_POLYGON);
-        for (int i = 0; i < 16; i++) {
-            float angle = 2.0f * M_PI * i / 16;
-            float scale = 1.0f + 0.1f * sin(collectable.animTime * 5);
-            glVertex2f(8 * scale * cos(angle), 8 * scale * sin(angle));
+        for (int i = 0; i < 24; i++) {
+            float angle = 2.0f * M_PI * i / 24;
+            glVertex2f(10.0f * cosf(angle), 10.0f * sinf(angle));
         }
         glEnd();
         
-        // Sparkle (triangle)
-        glColor3f(1.0f, 1.0f, 1.0f);
-        glBegin(GL_TRIANGLES);
-        glVertex2f(0, 6);
-        glVertex2f(-3, 0);
-        glVertex2f(3, 0);
+        // Rim ring (line loop)
+        glColor3f(1.0f, 0.9f, 0.3f);
+        glBegin(GL_LINE_LOOP);
+        for (int i = 0; i < 24; i++) {
+            float angle = 2.0f * M_PI * i / 24;
+            glVertex2f(9.0f * cosf(angle), 9.0f * sinf(angle));
+        }
         glEnd();
         
-        // Shine rays (lines)
-        glColor3f(1.0f, 1.0f, 0.8f);
-        glBegin(GL_LINES);
-        for (int i = 0; i < 4; i++) {
-            float angle = i * M_PI / 2 + collectable.animTime;
-            glVertex2f(0, 0);
-            glVertex2f(12 * cos(angle), 12 * sin(angle));
+        // Radial highlight (triangle fan gradient)
+        glBegin(GL_TRIANGLE_FAN);
+        glColor3f(1.0f, 0.98f, 0.6f); // center bright
+        glVertex2f(0.0f, 2.0f); // slight offset for specular tilt
+        glColor3f(1.0f, 0.85f, 0.2f); // outer gold
+        for (int i = 0; i <= 24; i++) {
+            float angle = 2.0f * M_PI * i / 24;
+            glVertex2f(10.0f * cosf(angle), 10.0f * sinf(angle));
+        }
+        glEnd();
+        
+        // Specular streak across face
+        glColor4f(1.0f, 1.0f, 1.0f, 0.35f);
+        glBegin(GL_QUADS);
+        glVertex2f(-7.0f, 3.0f);
+        glVertex2f(7.0f, 3.0f);
+        glVertex2f(7.0f, 1.0f);
+        glVertex2f(-7.0f, 1.0f);
+        glEnd();
+        
+        // Edge darkening when thin (simulates depth)
+        float edgeAlpha = 1.0f - t; // stronger when thinner
+        glColor4f(0.6f, 0.4f, 0.1f, 0.4f * edgeAlpha);
+        glBegin(GL_LINE_LOOP);
+        for (int i = 0; i < 24; i++) {
+            float angle = 2.0f * M_PI * i / 24;
+            glVertex2f(10.5f * cosf(angle), 10.5f * sinf(angle));
         }
         glEnd();
         
@@ -1348,114 +1376,208 @@ void drawHUD() {
     drawShadowedText(15, 20, "Controls: WASD/Arrows to move, Space/W/Up to jump", 0.9f, 0.9f, 0.9f);
 }
 
-// Draw game over screen
+// Draw game over screen (stylized)
 void drawGameOver() {
-    // Semi-transparent background
-    glColor3f(0.0f, 0.0f, 0.0f);
+    float t = menuAnimTime;
+    
+    // Dark animated gradient background
     glBegin(GL_QUADS);
-    glVertex2f(0, 0);
-    glVertex2f(WIDTH, 0);
-    glVertex2f(WIDTH, HEIGHT);
+    glColor3f(0.05f, 0.0f, 0.0f);
     glVertex2f(0, HEIGHT);
+    glVertex2f(WIDTH, HEIGHT);
+    glColor3f(0.15f + 0.05f * sin(t * 2.0f), 0.0f, 0.0f);
+    glVertex2f(WIDTH, HEIGHT / 2);
+    glVertex2f(0, HEIGHT / 2);
     glEnd();
-    
-    // Game Over title
-    glColor3f(1.0f, 0.2f, 0.2f);
-    drawText(WIDTH / 2 - 60, HEIGHT / 2 + 60, "GAME OVER");
-    
-    // Stats display
-    glColor3f(1.0f, 1.0f, 1.0f);
-    std::stringstream ss;
-    ss << "Final Score: " << score;
-    drawText(WIDTH / 2 - 70, HEIGHT / 2 + 20, ss.str().c_str());
-    
-    int collected = 0;
-    for (const auto& c : collectables) {
-        if (c.collected) collected++;
-    }
-    std::stringstream collectSS;
-    collectSS << "Coins Collected: " << collected << "/" << collectables.size();
-    drawText(WIDTH / 2 - 80, HEIGHT / 2 - 10, collectSS.str().c_str());
-    
-    std::stringstream timeSS;
-    timeSS << "Survival Time: " << (int)gameTime << " seconds";
-    drawText(WIDTH / 2 - 80, HEIGHT / 2 - 40, timeSS.str().c_str());
-    
-    // Instructions
-    glColor3f(0.8f, 0.8f, 0.8f);
-    drawText(WIDTH / 2 - 100, HEIGHT / 2 - 90, "Press R to restart or ESC to exit");
-    
-    // Encouraging message
-    if (collected >= 5) {
-        glColor3f(0.2f, 0.8f, 0.2f);
-        drawText(WIDTH / 2 - 90, HEIGHT / 2 - 70, "Great job! You found the key!");
-    } else {
-        glColor3f(0.8f, 0.6f, 0.2f);
-        drawText(WIDTH / 2 - 100, HEIGHT / 2 - 70, "Try to collect more coins next time!");
-    }
-}
 
-// Draw game win screen
-void drawGameWin() {
-    // Celebratory background with gradient effect
-    glColor3f(0.0f, 0.3f, 0.1f);
     glBegin(GL_QUADS);
-    glVertex2f(0, 0);
+    glColor3f(0.15f + 0.05f * sin(t * 2.0f), 0.0f, 0.0f);
+    glVertex2f(0, HEIGHT / 2);
+    glVertex2f(WIDTH, HEIGHT / 2);
+    glColor3f(0.02f, 0.0f, 0.0f);
     glVertex2f(WIDTH, 0);
-    glVertex2f(WIDTH, HEIGHT);
-    glVertex2f(0, HEIGHT);
+    glVertex2f(0, 0);
     glEnd();
-    
-    // Animated sparkles effect
-    glColor3f(1.0f, 1.0f, 0.0f);
-    for (int i = 0; i < 20; i++) {
-        float x = 50 + (i * 37) % (WIDTH - 100);
-        float y = 100 + (i * 23) % (HEIGHT - 200) + sin(gameTime * 3 + i) * 20;
-        glBegin(GL_TRIANGLES);
-        glVertex2f(x, y + 5);
-        glVertex2f(x - 3, y - 3);
-        glVertex2f(x + 3, y - 3);
+
+    // Subtle scanline/flicker effect
+    glColor4f(0.6f, 0.0f, 0.0f, 0.15f);
+    for (int i = 0; i < HEIGHT; i += 8) {
+        float offset = fmod(t * 40.0f, 8.0f);
+        glBegin(GL_LINES);
+        glVertex2f(0, i + offset);
+        glVertex2f(WIDTH, i + offset);
         glEnd();
     }
-    
-    // Victory title
-    glColor3f(0.2f, 1.0f, 0.2f);
-    drawText(WIDTH / 2 - 80, HEIGHT / 2 + 80, "CONGRATULATIONS!");
-    
-    glColor3f(1.0f, 1.0f, 0.0f);
-    drawText(WIDTH / 2 - 50, HEIGHT / 2 + 50, "YOU WIN!");
-    
-    // Detailed stats
-    glColor3f(1.0f, 1.0f, 1.0f);
+
+    // Skull icon in the background
+    glPushMatrix();
+    glTranslatef(WIDTH / 2.0f, HEIGHT / 2.0f + 40.0f, 0);
+    float pulse = 0.9f + 0.1f * sin(t * 3.0f);
+    glScalef(2.0f * pulse, 2.0f * pulse, 1.0f);
+    // Head
+    glColor3f(0.9f, 0.9f, 0.9f);
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 24; i++) {
+        float a = 2.0f * M_PI * i / 24;
+        glVertex2f(0 + 18 * cos(a), 10 + 18 * sin(a));
+    }
+    glEnd();
+    // Jaw
+    glBegin(GL_QUADS);
+    glVertex2f(-12, -2);
+    glVertex2f(12, -2);
+    glVertex2f(12, -12);
+    glVertex2f(-12, -12);
+    glEnd();
+    // Eyes (holes)
+    glColor3f(0.1f, 0.0f, 0.0f);
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 12; i++) {
+        float a = 2.0f * M_PI * i / 12;
+        glVertex2f(-7 + 5 * cos(a), 8 + 5 * sin(a));
+    }
+    glEnd();
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 12; i++) {
+        float a = 2.0f * M_PI * i / 12;
+        glVertex2f(7 + 5 * cos(a), 8 + 5 * sin(a));
+    }
+    glEnd();
+    // Nose (triangle)
+    glBegin(GL_TRIANGLES);
+    glVertex2f(0, 4);
+    glVertex2f(-3, 0);
+    glVertex2f(3, 0);
+    glEnd();
+    glPopMatrix();
+
+    // Title with glow and slight jitter
+    float jitterX = sin(t * 8.0f) * 2.0f;
+    float jitterY = cos(t * 6.0f) * 2.0f;
+    drawShadowedText(WIDTH / 2 - 70 + jitterX, HEIGHT / 2 + 90 + jitterY, "GAME OVER", 1.0f, 0.2f + 0.2f * sin(t * 3.0f), 0.2f);
+
+    // Stats panels
+    drawBrickPanelWithShadow(WIDTH / 2 - 120, HEIGHT / 2 + 35, 240, 28, 0.5f, 0.2f, 0.2f);
     std::stringstream ss;
     ss << "Final Score: " << score;
-    drawText(WIDTH / 2 - 70, HEIGHT / 2 + 10, ss.str().c_str());
-    
+    drawShadowedText(WIDTH / 2 - 90, HEIGHT / 2 + 55, ss.str().c_str(), 1.0f, 0.95f, 0.95f);
+
     int collected = 0;
-    for (const auto& c : collectables) {
-        if (c.collected) collected++;
-    }
+    for (const auto& c : collectables) if (c.collected) collected++;
+    drawBrickPanelWithShadow(WIDTH / 2 - 140, HEIGHT / 2 - 5, 280, 28, 0.45f, 0.2f, 0.2f);
     std::stringstream collectSS;
     collectSS << "Coins Collected: " << collected << "/" << collectables.size();
-    drawText(WIDTH / 2 - 80, HEIGHT / 2 - 20, collectSS.str().c_str());
-    
+    drawShadowedText(WIDTH / 2 - 115, HEIGHT / 2 + 15, collectSS.str().c_str(), 1.0f, 0.95f, 0.95f);
+
+    drawBrickPanelWithShadow(WIDTH / 2 - 140, HEIGHT / 2 - 45, 280, 28, 0.4f, 0.15f, 0.15f);
     std::stringstream timeSS;
-    timeSS << "Completion Time: " << (int)gameTime << " seconds";
-    drawText(WIDTH / 2 - 85, HEIGHT / 2 - 50, timeSS.str().c_str());
-    
-    // Performance evaluation
-    glColor3f(0.2f, 0.8f, 1.0f);
-    if (gameTime < 60) {
-        drawText(WIDTH / 2 - 60, HEIGHT / 2 - 80, "SPEED RUNNER!");
-    } else if (collected == collectables.size()) {
-        drawText(WIDTH / 2 - 70, HEIGHT / 2 - 80, "PERFECT COLLECTOR!");
+    timeSS << "Survival Time: " << (int)gameTime << "s";
+    drawShadowedText(WIDTH / 2 - 85, HEIGHT / 2 - 25, timeSS.str().c_str(), 1.0f, 0.9f, 0.9f);
+
+    // Message and instructions
+    if (collected >= 5) {
+        drawShadowedText(WIDTH / 2 - 120, HEIGHT / 2 - 75, "Great job! You found the key!", 0.3f, 1.0f, 0.3f);
     } else {
-        drawText(WIDTH / 2 - 70, HEIGHT / 2 - 80, "TOWER CONQUERED!");
+        drawShadowedText(WIDTH / 2 - 150, HEIGHT / 2 - 75, "Try to collect more coins next time!", 1.0f, 0.8f, 0.3f);
     }
-    
+    drawBrickPanelWithShadow(WIDTH / 2 - 170, HEIGHT / 2 - 105, 340, 28, 0.25f, 0.25f, 0.35f);
+    drawShadowedText(WIDTH / 2 - 150, HEIGHT / 2 - 85, "Press R to restart or ESC to exit", 0.9f, 0.9f, 0.9f);
+}
+
+// Draw game win screen (stylized)
+void drawGameWin() {
+    float t = menuAnimTime;
+
+    // Radiant gradient background
+    glBegin(GL_QUADS);
+    glColor3f(0.0f, 0.25f, 0.1f + 0.1f * sin(t * 1.5f));
+    glVertex2f(0, HEIGHT);
+    glVertex2f(WIDTH, HEIGHT);
+    glColor3f(0.0f, 0.35f, 0.2f);
+    glVertex2f(WIDTH, HEIGHT / 2);
+    glVertex2f(0, HEIGHT / 2);
+    glEnd();
+
+    glBegin(GL_QUADS);
+    glColor3f(0.0f, 0.35f, 0.2f);
+    glVertex2f(0, HEIGHT / 2);
+    glVertex2f(WIDTH, HEIGHT / 2);
+    glColor3f(0.0f, 0.15f, 0.1f);
+    glVertex2f(WIDTH, 0);
+    glVertex2f(0, 0);
+    glEnd();
+
+    // Radiating starburst lines
+    glColor4f(1.0f, 1.0f, 0.4f, 0.35f);
+    glPushMatrix();
+    glTranslatef(WIDTH / 2.0f, HEIGHT / 2.0f + 40.0f, 0);
+    for (int i = 0; i < 24; i++) {
+        float a = i * (2.0f * M_PI / 24.0f) + t * 0.8f;
+        float r1 = 20.0f + 5.0f * sin(t * 3.0f + i);
+        float r2 = 220.0f + 10.0f * sin(t * 2.0f + i * 0.5f);
+        glBegin(GL_LINES);
+        glVertex2f(r1 * cos(a), r1 * sin(a));
+        glVertex2f(r2 * cos(a), r2 * sin(a));
+        glEnd();
+    }
+    glPopMatrix();
+
+    // Confetti
+    for (int i = 0; i < 40; i++) {
+        float ang = i * (2.0f * M_PI / 40.0f) + t * (0.8f + 0.2f * (i % 5));
+        float rad = 60.0f + 20.0f * sin(t * 1.7f + i);
+        float cx = WIDTH / 2 + (150 + rad) * cos(ang);
+        float cy = HEIGHT / 2 + 40 + (120 + rad) * sin(ang);
+        float rot = t * (50 + i * 3);
+        glPushMatrix();
+        glTranslatef(cx, cy, 0);
+        glRotatef(rot, 0, 0, 1);
+        float cr = 0.5f + 0.5f * sin(i + t);
+        float cg = 0.5f + 0.5f * sin(i * 1.3f + t * 0.8f);
+        float cb = 0.5f + 0.5f * sin(i * 0.7f + t * 1.2f);
+        glColor3f(cr, cg, cb);
+        glBegin(GL_TRIANGLES);
+        glVertex2f(0, 0);
+        glVertex2f(8, 3);
+        glVertex2f(3, 8);
+        glEnd();
+        glPopMatrix();
+    }
+
+    // Titles with glow
+    drawShadowedText(WIDTH / 2 - 100, HEIGHT / 2 + 100, "CONGRATULATIONS!", 0.3f + 0.7f * fabs(sin(t)), 1.0f, 0.3f);
+    drawShadowedText(WIDTH / 2 - 50, HEIGHT / 2 + 70, "YOU WIN!", 1.0f, 1.0f, 0.0f);
+
+    // Stats panels
+    drawBrickPanelWithShadow(WIDTH / 2 - 120, HEIGHT / 2 + 25, 240, 28, 0.2f, 0.6f, 0.2f);
+    std::stringstream ss;
+    ss << "Final Score: " << score;
+    drawShadowedText(WIDTH / 2 - 90, HEIGHT / 2 + 45, ss.str().c_str(), 1.0f, 1.0f, 1.0f);
+
+    int collected = 0;
+    for (const auto& c : collectables) if (c.collected) collected++;
+    drawBrickPanelWithShadow(WIDTH / 2 - 140, HEIGHT / 2 - 15, 280, 28, 0.25f, 0.6f, 0.25f);
+    std::stringstream collectSS;
+    collectSS << "Coins Collected: " << collected << "/" << collectables.size();
+    drawShadowedText(WIDTH / 2 - 115, HEIGHT / 2 + 5, collectSS.str().c_str(), 1.0f, 1.0f, 1.0f);
+
+    drawBrickPanelWithShadow(WIDTH / 2 - 140, HEIGHT / 2 - 55, 280, 28, 0.2f, 0.5f, 0.4f);
+    std::stringstream timeSS;
+    timeSS << "Completion Time: " << (int)gameTime << "s";
+    drawShadowedText(WIDTH / 2 - 95, HEIGHT / 2 - 35, timeSS.str().c_str(), 1.0f, 1.0f, 1.0f);
+
+    // Performance flair
+    if (gameTime < 60) {
+        drawShadowedText(WIDTH / 2 - 60, HEIGHT / 2 - 85, "SPEED RUNNER!", 0.2f, 0.8f, 1.0f);
+    } else if (collected == (int)collectables.size()) {
+        drawShadowedText(WIDTH / 2 - 80, HEIGHT / 2 - 85, "PERFECT COLLECTOR!", 1.0f, 0.9f, 0.2f);
+    } else {
+        drawShadowedText(WIDTH / 2 - 70, HEIGHT / 2 - 85, "TOWER CONQUERED!", 0.6f, 0.8f, 1.0f);
+    }
+
     // Instructions
-    glColor3f(0.8f, 0.8f, 0.8f);
-    drawText(WIDTH / 2 - 100, HEIGHT / 2 - 110, "Press R to restart or ESC to exit");
+    drawBrickPanelWithShadow(WIDTH / 2 - 170, HEIGHT / 2 - 115, 340, 28, 0.25f, 0.25f, 0.35f);
+    drawShadowedText(WIDTH / 2 - 150, HEIGHT / 2 - 95, "Press R to restart or ESC to exit", 0.95f, 0.95f, 0.95f);
 }
 
 // Update game logic
@@ -1526,11 +1648,11 @@ void update(float deltaTime) {
         }
     }
     
-    // Spawn rocks - less frequently
+    // Spawn rocks - more frequently at random intervals
     rockSpawnTimer -= deltaTime;
     if (rockSpawnTimer <= 0) {
         rocks.push_back({(float)(rand() % (WIDTH - 20)), (float)HEIGHT, true});
-        rockSpawnTimer = 4.0f + (rand() % 4); // Slower spawn rate
+        rockSpawnTimer = 1.2f + (rand() % 140) / 100.0f; // 1.2s - 2.6s
     }
     
     // Update rocks
@@ -1989,120 +2111,108 @@ void drawLayeredBackground() {
     glEnd();
 }
 
+// Measure text width using GLUT bitmap widths
+int measureTextWidth(const char* text) {
+    int w = 0;
+    while (*text) { w += glutBitmapWidth(GLUT_BITMAP_HELVETICA_18, *text++); }
+    return w;
+}
+
+void drawTextCentered(float cx, float y, const char* text) {
+    int w = measureTextWidth(text);
+    drawText(cx - w / 2.0f, y, text);
+}
+
+void drawShadowedTextCentered(float cx, float y, const char* text, float r, float g, float b) {
+    int w = measureTextWidth(text);
+    drawShadowedText(cx - w / 2.0f, y, text, r, g, b);
+}
+
 // Draw start menu
 void drawStartMenu() {
-    // Title panel
-    drawBrickPanel(WIDTH / 2 - 200, HEIGHT - 150, 400, 60, 0.8f, 0.6f, 0.2f);
+    float centerX = WIDTH / 2.0f;
     
-    glColor3f(1.0f, 1.0f, 1.0f);
-    drawText(WIDTH / 2 - 80, HEIGHT - 120, "ICY TOWER ADVENTURE");
+    // Title panel with shadow (responsive width)
+    const char* title = "ICY TOWER ADVENTURE";
+    float titlePanelW = std::min<float>(WIDTH - 40, std::max<float>(400.0f, measureTextWidth(title) + 120.0f));
+    drawBrickPanelWithShadow(centerX - titlePanelW / 2, HEIGHT - 150, titlePanelW, 60, 0.8f, 0.6f, 0.2f);
+    drawShadowedTextCentered(centerX, HEIGHT - 120, title, 1.0f, 1.0f, 1.0f);
     
-    // Menu options with selection highlighting
-    float menuY = HEIGHT / 2 + 50;
-    float spacing = 60;
+    // Menu options with selection highlighting (responsive widths)
+    float menuY = HEIGHT / 2 + 70;
+    float spacing = 70;
     
-    // Start Game
-    if (currentMenuSelection == MENU_START) {
-        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.2f, 0.8f, 0.2f);
-        glColor3f(1.0f, 1.0f, 0.0f);
-    } else {
-        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.5f, 0.5f, 0.5f);
-        glColor3f(0.8f, 0.8f, 0.8f);
-    }
-    drawText(WIDTH / 2 - 50, menuY + 10, "START GAME");
+    auto drawMenuItem = [&](const char* label, bool selected, float y) {
+        float panelW = std::max<float>(240.0f, measureTextWidth(label) + 80.0f);
+        float px = centerX - panelW / 2.0f;
+        if (selected) {
+            drawBrickPanelWithShadow(px, y - 15, panelW, 46, 0.2f, 0.8f, 0.2f);
+            drawShadowedTextCentered(centerX, y + 6, label, 1.0f, 1.0f, 0.0f);
+        } else {
+            drawBrickPanelWithShadow(px, y - 15, panelW, 46, 0.5f, 0.5f, 0.5f);
+            drawShadowedTextCentered(centerX, y + 6, label, 0.85f, 0.85f, 0.85f);
+        }
+    };
     
-    // Character Select
-    menuY -= spacing;
-    if (currentMenuSelection == MENU_CHARACTER) {
-        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.2f, 0.8f, 0.2f);
-        glColor3f(1.0f, 1.0f, 0.0f);
-    } else {
-        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.5f, 0.5f, 0.5f);
-        glColor3f(0.8f, 0.8f, 0.8f);
-    }
-    drawText(WIDTH / 2 - 70, menuY + 10, "SELECT CHARACTER");
+    drawMenuItem("START GAME", currentMenuSelection == MENU_START, menuY);
+    drawMenuItem("SELECT CHARACTER", currentMenuSelection == MENU_CHARACTER, menuY - spacing);
+    drawMenuItem("EXIT", currentMenuSelection == MENU_EXIT, menuY - 2 * spacing);
     
-    // Exit
-    menuY -= spacing;
-    if (currentMenuSelection == MENU_EXIT) {
-        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.8f, 0.2f, 0.2f);
-        glColor3f(1.0f, 1.0f, 0.0f);
-    } else {
-        drawBrickPanel(WIDTH / 2 - 100, menuY - 10, 200, 40, 0.5f, 0.5f, 0.5f);
-        glColor3f(0.8f, 0.8f, 0.8f);
-    }
-    drawText(WIDTH / 2 - 25, menuY + 10, "EXIT");
-    
-    // Instructions
-    drawBrickPanel(50, 50, WIDTH - 100, 40, 0.4f, 0.4f, 0.6f);
-    glColor3f(0.9f, 0.9f, 0.9f);
-    drawText(60, 75, "Use UP/DOWN arrows to navigate, ENTER to select");
+    // Instructions (responsive width)
+    const char* hint = "Use UP/DOWN arrows to navigate, ENTER to select";
+    float hintW = std::min<float>(WIDTH - 100, std::max<float>(420.0f, measureTextWidth(hint) + 60.0f));
+    drawBrickPanelWithShadow(centerX - hintW / 2, 50, hintW, 40, 0.4f, 0.4f, 0.6f);
+    drawShadowedTextCentered(centerX, 75, hint, 0.9f, 0.9f, 0.9f);
 }
 
 // Draw character selection menu
 void drawCharacterSelect() {
-    // Title panel
-    drawBrickPanel(WIDTH / 2 - 150, HEIGHT - 100, 300, 40, 0.8f, 0.6f, 0.2f);
-    glColor3f(1.0f, 1.0f, 1.0f);
-    drawText(WIDTH / 2 - 80, HEIGHT - 75, "CHOOSE CHARACTER");
+    float centerX = WIDTH / 2.0f;
     
-    // Character displays
-    float charY = HEIGHT / 2;
-    float charSpacing = 200;
-    float startX = WIDTH / 2 - charSpacing;
+    // Title panel with shadow (responsive)
+    const char* title = "CHOOSE CHARACTER";
+    float titlePanelW = std::min<float>(WIDTH - 40, std::max<float>(300.0f, measureTextWidth(title) + 120.0f));
+    drawBrickPanelWithShadow(centerX - titlePanelW / 2, HEIGHT - 110, titlePanelW, 48, 0.8f, 0.6f, 0.2f);
+    drawShadowedTextCentered(centerX, HEIGHT - 85, title, 1.0f, 1.0f, 1.0f);
     
-    // Witch
-    if (currentCharacterSelection == CHAR_WITCH) {
-        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.4f, 0.2f, 0.8f);
-        glColor3f(1.0f, 1.0f, 0.0f);
-        drawText(startX - 25, charY - 100, "WITCH");
-    } else {
-        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.3f, 0.3f, 0.3f);
-        glColor3f(0.7f, 0.7f, 0.7f);
-        drawText(startX - 25, charY - 100, "WITCH");
-    }
-    drawWitch(startX - 30, charY - 60, true);
+    // Character displays (responsive spacing and larger cards)
+    float cardW = 140.0f, cardH = 180.0f;
+    float charY = HEIGHT / 2.0f;
+    float charSpacing = std::max(220.0f, WIDTH * 0.28f);
+    float startX = centerX - charSpacing;
     
-    // Footballer
-    startX += charSpacing;
-    if (currentCharacterSelection == CHAR_FOOTBALLER) {
-        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.2f, 0.8f, 0.2f);
-        glColor3f(1.0f, 1.0f, 0.0f);
-        drawText(startX - 50, charY - 100, "FOOTBALLER");
-    } else {
-        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.3f, 0.3f, 0.3f);
-        glColor3f(0.7f, 0.7f, 0.7f);
-        drawText(startX - 50, charY - 100, "FOOTBALLER");
-    }
-    drawFootballer(startX - 30, charY - 60, true);
+    auto drawCharacterCard = [&](float cardCenterX, const char* label, bool selected, void(*drawFn)(float,float,bool)) {
+        float px = cardCenterX - cardW / 2.0f;
+        if (selected) {
+            drawBrickPanelWithShadow(px, charY - cardH / 2.0f, cardW, cardH, 0.4f, 0.6f, 0.9f);
+            drawShadowedTextCentered(cardCenterX, charY - cardH / 2.0f - 20, label, 1.0f, 1.0f, 0.0f);
+        } else {
+            drawBrickPanelWithShadow(px, charY - cardH / 2.0f, cardW, cardH, 0.3f, 0.3f, 0.3f);
+            drawShadowedTextCentered(cardCenterX, charY - cardH / 2.0f - 20, label, 0.8f, 0.8f, 0.8f);
+        }
+        drawFn(cardCenterX - 30, charY - 60, true);
+    };
     
-    // Businessman
-    startX += charSpacing;
-    if (currentCharacterSelection == CHAR_BUSINESSMAN) {
-        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.6f, 0.6f, 0.2f);
-        glColor3f(1.0f, 1.0f, 0.0f);
-        drawText(startX - 60, charY - 100, "BUSINESSMAN");
-    } else {
-        drawBrickPanel(startX - 60, charY - 80, 120, 160, 0.3f, 0.3f, 0.3f);
-        glColor3f(0.7f, 0.7f, 0.7f);
-        drawText(startX - 60, charY - 100, "BUSINESSMAN");
-    }
-    drawBusinessman(startX - 30, charY - 60, true);
+    drawCharacterCard(startX,       "WITCH",       currentCharacterSelection == CHAR_WITCH,       drawWitch);
+    drawCharacterCard(startX + charSpacing, "FOOTBALLER", currentCharacterSelection == CHAR_FOOTBALLER, drawFootballer);
+    drawCharacterCard(startX + 2 * charSpacing, "BUSINESSMAN", currentCharacterSelection == CHAR_BUSINESSMAN, drawBusinessman);
     
-    // Back option
+    // Back option (responsive)
+    float backPanelW = std::max<float>(120.0f, measureTextWidth("BACK") + 40.0f);
+    float backX = centerX - backPanelW / 2.0f;
     if (currentCharacterSelection == CHAR_BACK) {
-        drawBrickPanel(WIDTH / 2 - 50, 100, 100, 30, 0.8f, 0.2f, 0.2f);
-        glColor3f(1.0f, 1.0f, 0.0f);
+        drawBrickPanelWithShadow(backX, 100, backPanelW, 34, 0.8f, 0.2f, 0.2f);
+        drawShadowedTextCentered(centerX, 120, "BACK", 1.0f, 1.0f, 0.0f);
     } else {
-        drawBrickPanel(WIDTH / 2 - 50, 100, 100, 30, 0.5f, 0.5f, 0.5f);
-        glColor3f(0.8f, 0.8f, 0.8f);
+        drawBrickPanelWithShadow(backX, 100, backPanelW, 34, 0.5f, 0.5f, 0.5f);
+        drawShadowedTextCentered(centerX, 120, "BACK", 0.8f, 0.8f, 0.8f);
     }
-    drawText(WIDTH / 2 - 20, 120, "BACK");
     
-    // Instructions
-    drawBrickPanel(50, 20, WIDTH - 100, 30, 0.4f, 0.4f, 0.6f);
-    glColor3f(0.9f, 0.9f, 0.9f);
-    drawText(60, 40, "Use LEFT/RIGHT arrows to select, ENTER to confirm");
+    // Instructions (responsive)
+    const char* hint = "Use LEFT/RIGHT arrows to select, ENTER to confirm";
+    float hintW = std::min<float>(WIDTH - 100, std::max<float>(420.0f, measureTextWidth(hint) + 60.0f));
+    drawBrickPanelWithShadow(centerX - hintW / 2, 20, hintW, 34, 0.4f, 0.4f, 0.6f);
+    drawShadowedTextCentered(centerX, 40, hint, 0.9f, 0.9f, 0.9f);
 }
 
 
