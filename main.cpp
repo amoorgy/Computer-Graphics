@@ -58,6 +58,14 @@ MenuSelection currentMenuSelection = MENU_START;
 CharacterSelection currentCharacterSelection = CHAR_WITCH;
 CharacterType selectedCharacter = WITCH;
 float menuAnimTime = 0.0f;
+float logoGlowTime = 0.0f;
+
+// Win/Lose screen button states
+enum WinLoseButton {
+    BUTTON_RESTART,
+    BUTTON_EXIT
+};
+WinLoseButton currentWinLoseButton = BUTTON_RESTART;
 
 // Player properties
 struct Player {
@@ -71,6 +79,10 @@ struct Player {
     bool canDoubleJump;
     bool hasDoubleJumped;
 } player;
+
+// Movement input state for smooth acceleration
+bool leftPressed = false;
+bool rightPressed = false;
 
 // Platform structure
 struct Platform {
@@ -89,6 +101,7 @@ struct Collectable {
     float x, y;
     bool collected;
     float animTime;
+    int index; // For determining odd/even behavior
 };
 
 // Power-up structure
@@ -107,6 +120,20 @@ std::vector<Collectable> collectables;
 std::vector<PowerUp> powerUps;
 float lavaHeight = 50.0f;
 float lavaSpeed = 0.5f;
+
+// Falling character structure for win screen
+struct FallingCharacter {
+    float x, y;
+    CharacterType type;
+    float rotationSpeed;
+    float rotation;
+    float fallSpeed;
+    float scale;
+    bool active;
+};
+
+std::vector<FallingCharacter> fallingCharacters;
+float characterSpawnTimer = 0.0f;
 bool keySpawned = false;
 float keyX, keyY;
 float keyAnimTime = 0.0f;
@@ -122,6 +149,12 @@ float powerUpSpawnTimer = 0.0f;
 // Jump flip state
 float playerAirTime = 0.0f;
 float playerFlipAngle = 0.0f;
+
+// Door suction animation state
+bool playerBeingSucked = false;
+float suctionAnimTime = 0.0f;
+float suctionStartX, suctionStartY;
+float doorCenterX, doorCenterY;
 
 // Terrain generation patterns
 enum TerrainPattern {
@@ -157,60 +190,53 @@ void initGame() {
     // Choose random terrain pattern
     TerrainPattern pattern = (TerrainPattern)(rand() % 3);
     
-    // Level platforms with varied terrain generation - slightly harder
+    // Level platforms with challenging, varied generation
     float platformY = 135; // Start slightly higher
-    for (int i = 0; i < 16; i++) { // Fewer platforms for more challenge
-        float platformWidth;
-        if (i % 3 == 0) platformWidth = 90;   // Smaller platforms
-        else if (i % 3 == 1) platformWidth = 130; 
-        else platformWidth = 170;
+    const int baseWidths[4] = {50, 100, 150, 200};
+    for (int i = 0; i < 18; i++) { // Slightly more platforms
+        // Pick one of the 4 main lengths with variation
+        int w = baseWidths[rand() % 4];
+        int jitter = (rand() % 21) - 10; // -10..+10 for more variation
+        float platformWidth = std::max(40, w + jitter);
         
-        // Generate platform position based on pattern
+        // Generate platform position using edge-to-edge offset rule (±50)
         float platformX;
         if (i == 0) {
             platformX = WIDTH / 2 - platformWidth / 2; // Center first platform
         } else {
-            float prevX = platforms.back().x + platforms.back().width / 2;
-            float targetZone, zoneWidth;
-            
-            switch (pattern) {
-                case MIDDLE_FOCUSED:
-                    targetZone = WIDTH / 2;
-                    zoneWidth = WIDTH * 0.6f; // 60% of screen width
-                    break;
-                case LEFT_FOCUSED:
-                    targetZone = WIDTH * 0.3f;
-                    zoneWidth = WIDTH * 0.5f; // 50% of screen width, left side
-                    break;
-                case RIGHT_FOCUSED:
-                    targetZone = WIDTH * 0.7f;
-                    zoneWidth = WIDTH * 0.5f; // 50% of screen width, right side
-                    break;
-            }
-            
-            // Random position within the focused zone, but still reachable
-            float minZone = targetZone - zoneWidth / 2;
-            float maxZone = targetZone + zoneWidth / 2;
-            
-            // Ensure platform stays within screen bounds
-            minZone = std::max(0.0f, minZone);
-            maxZone = std::min((float)(WIDTH - platformWidth), maxZone);
-            
-            // Keep within jumping distance but add more randomness
-            float maxDistance = 160; // Slightly harder
-            float minX = std::max(minZone, prevX - maxDistance);
-            float maxX = std::min(maxZone, prevX + maxDistance - platformWidth);
-            
-            if (minX < maxX) {
-                platformX = minX + rand() % (int)(maxX - minX + 1);
+            const Platform& prev = platforms.back();
+            float prevLeft = prev.x;
+            float prevRight = prev.x + prev.width;
+            bool attachRight = rand() % 2; // Randomly branch left/right
+            float minLeft, maxLeft;
+            if (attachRight) {
+                // New left edge within ±50 of previous right edge
+                minLeft = prevRight - 50.0f;
+                maxLeft = prevRight + 50.0f - platformWidth;
             } else {
-                // Fallback if constraints are too tight
-                platformX = std::max(0.0f, std::min((float)(WIDTH - platformWidth), prevX + (rand() % 200 - 100)));
+                // New right edge within ±50 of previous left edge
+                minLeft = (prevLeft - 50.0f) - platformWidth;
+                maxLeft = (prevLeft + 50.0f) - platformWidth;
+            }
+            // Clamp to screen bounds
+            minLeft = std::max(0.0f, minLeft);
+            maxLeft = std::min((float)(WIDTH - platformWidth), maxLeft);
+            
+            if (minLeft <= maxLeft) {
+                if (maxLeft - minLeft < 1.0f) platformX = minLeft;
+                else platformX = minLeft + (rand() % (int)(maxLeft - minLeft + 1));
+            } else {
+                // Fallback: near previous center within ±50
+                float prevCenter = prev.x + prev.width / 2.0f;
+                float fallbackMin = std::max(0.0f, prevCenter - 50.0f - platformWidth / 2.0f);
+                float fallbackMax = std::min((float)(WIDTH - platformWidth), prevCenter + 50.0f - platformWidth / 2.0f);
+                platformX = (fallbackMin + fallbackMax) * 0.5f;
             }
         }
         
         platforms.push_back({platformX, platformY, platformWidth, 15, true});
-        platformY += 50 + rand() % 30; // Slightly more vertical spacing
+        // Vertical spacing tuned for reachability
+        platformY += 45 + rand() % 30; // 45..74
     }
     
     // Create collectables (at least 5) - Place them near platforms
@@ -222,12 +248,12 @@ void initGame() {
             float platY = platforms[i + 1].y + platforms[i + 1].height + 20;
             float x = platX + (rand() % 60 - 30); // Small offset from platform center
             float y = platY + (rand() % 30);
-            collectables.push_back({x, y, false, 0.0f});
+            collectables.push_back({x, y, false, 0.0f, i});
         } else {
             // Backup placement for extra collectables
             float x = 100 + rand() % (WIDTH - 200);
             float y = 250 + i * 60 + rand() % 30;
-            collectables.push_back({x, y, false, 0.0f});
+            collectables.push_back({x, y, false, 0.0f, i});
         }
     }
     
@@ -240,6 +266,10 @@ void initGame() {
     doorEnterAnimTime = 0.0f;
     doorIsUnlocking = false;
     doorIsEntering = false;
+    
+    // Reset suction animation
+    playerBeingSucked = false;
+    suctionAnimTime = 0.0f;
 }
 
 // Check collision between two rectangles
@@ -266,8 +296,246 @@ void drawShadowedText(float x, float y, const char* text, float r, float g, floa
     drawText(x, y, text);
 }
 
-// Forward declaration for drawBrickPanel used below
+// Forward declarations
 void drawBrickPanel(float x, float y, float width, float height, float r, float g, float b);
+int measureTextWidth(const char* text);
+void drawTextCentered(float cx, float y, const char* text);
+void drawShadowedTextCentered(float cx, float y, const char* text, float r, float g, float b);
+void drawLayeredBackground();
+void initFallingCharacters();
+
+// Draw pixel art Icy Tower logo with glow animation
+void drawIcyTowerLogo(float centerX, float centerY) {
+    float pixelSize = 8.0f; // Bigger pixels
+    logoGlowTime += 0.016f; // Increment glow timer
+    
+    // Create glow wave that moves from left to right every 3 seconds
+    float glowWave = fmod(logoGlowTime, 3.0f) / 3.0f; // 0 to 1 over 3 seconds
+    
+    // ICY - pixel art pattern (iced blue style) - bigger and more tower-like
+    float icyStartX = centerX - 280;
+    float icyStartY = centerY + 30;
+    
+    // I letter pixels - taller and more prominent
+    int iPixels[][2] = {
+        {1,0}, {2,0}, {3,0}, {4,0}, {5,0}, {6,0}, {7,0},
+        {4,1}, {4,2}, {4,3}, {4,4}, {4,5}, {4,6}, {4,7}, {4,8}, {4,9}, {4,10},
+        {1,11}, {2,11}, {3,11}, {4,11}, {5,11}, {6,11}, {7,11}
+    };
+    
+    // C letter pixels - bigger and more detailed
+    int cPixels[][2] = {
+        {11,2}, {12,2}, {13,2}, {14,2}, {15,2}, {16,2},
+        {10,3}, {17,3},
+        {9,4}, {18,4},
+        {9,5}, 
+        {9,6},
+        {9,7}, {18,7},
+        {10,8}, {17,8},
+        {11,9}, {12,9}, {13,9}, {14,9}, {15,9}, {16,9}
+    };
+    
+    // Y letter pixels - bigger and more tower-like
+    int yPixels[][2] = {
+        {21,0}, {27,0},
+        {22,1}, {26,1},
+        {23,2}, {25,2},
+        {24,3}, {24,4}, {24,5}, {24,6}, {24,7}, {24,8}, {24,9}, {24,10}, {24,11}
+    };
+    
+    // Draw ICY with ice-blue colors and glow effect
+    for (int i = 0; i < 19; i++) { // Updated count
+        float pixelX = icyStartX + iPixels[i][0] * pixelSize;
+        float pixelY = icyStartY - iPixels[i][1] * pixelSize;
+        float glowIntensity = 1.0f;
+        
+        // Calculate glow based on horizontal position
+        float normalizedX = (float)iPixels[i][0] / 28.0f; // Normalize across full logo width
+        if (glowWave > normalizedX - 0.1f && glowWave < normalizedX + 0.1f) {
+            glowIntensity = 1.5f + 0.5f * sin((glowWave - normalizedX) * 50.0f);
+        }
+        
+        // Ice blue colors with glow
+        glColor3f(0.4f * glowIntensity, 0.8f * glowIntensity, 1.0f * glowIntensity);
+        glBegin(GL_QUADS);
+        glVertex2f(pixelX, pixelY);
+        glVertex2f(pixelX + pixelSize, pixelY);
+        glVertex2f(pixelX + pixelSize, pixelY + pixelSize);
+        glVertex2f(pixelX, pixelY + pixelSize);
+        glEnd();
+        
+        // Ice crystal effect on some pixels
+        if (i % 3 == 0) {
+            glColor3f(0.8f * glowIntensity, 0.9f * glowIntensity, 1.0f * glowIntensity);
+            glBegin(GL_LINES);
+            glVertex2f(pixelX + 1, pixelY + 1);
+            glVertex2f(pixelX + pixelSize - 1, pixelY + pixelSize - 1);
+            glVertex2f(pixelX + pixelSize - 1, pixelY + 1);
+            glVertex2f(pixelX + 1, pixelY + pixelSize - 1);
+            glEnd();
+        }
+    }
+    
+    // Draw C
+    for (int i = 0; i < 18; i++) { // Updated count
+        float pixelX = icyStartX + cPixels[i][0] * pixelSize;
+        float pixelY = icyStartY - cPixels[i][1] * pixelSize;
+        float glowIntensity = 1.0f;
+        
+        float normalizedX = (float)cPixels[i][0] / 28.0f;
+        if (glowWave > normalizedX - 0.1f && glowWave < normalizedX + 0.1f) {
+            glowIntensity = 1.5f + 0.5f * sin((glowWave - normalizedX) * 50.0f);
+        }
+        
+        glColor3f(0.4f * glowIntensity, 0.8f * glowIntensity, 1.0f * glowIntensity);
+        glBegin(GL_QUADS);
+        glVertex2f(pixelX, pixelY);
+        glVertex2f(pixelX + pixelSize, pixelY);
+        glVertex2f(pixelX + pixelSize, pixelY + pixelSize);
+        glVertex2f(pixelX, pixelY + pixelSize);
+        glEnd();
+        
+        if (i % 2 == 0) {
+            glColor3f(0.8f * glowIntensity, 0.9f * glowIntensity, 1.0f * glowIntensity);
+            glBegin(GL_LINES);
+            glVertex2f(pixelX + 1, pixelY + 1);
+            glVertex2f(pixelX + pixelSize - 1, pixelY + pixelSize - 1);
+            glEnd();
+        }
+    }
+    
+    // Draw Y
+    for (int i = 0; i < 15; i++) { // Updated count
+        float pixelX = icyStartX + yPixels[i][0] * pixelSize;
+        float pixelY = icyStartY - yPixels[i][1] * pixelSize;
+        float glowIntensity = 1.0f;
+        
+        float normalizedX = (float)yPixels[i][0] / 28.0f;
+        if (glowWave > normalizedX - 0.1f && glowWave < normalizedX + 0.1f) {
+            glowIntensity = 1.5f + 0.5f * sin((glowWave - normalizedX) * 50.0f);
+        }
+        
+        glColor3f(0.4f * glowIntensity, 0.8f * glowIntensity, 1.0f * glowIntensity);
+        glBegin(GL_QUADS);
+        glVertex2f(pixelX, pixelY);
+        glVertex2f(pixelX + pixelSize, pixelY);
+        glVertex2f(pixelX + pixelSize, pixelY + pixelSize);
+        glVertex2f(pixelX, pixelY + pixelSize);
+        glEnd();
+        
+        if (i % 3 == 1) {
+            glColor3f(0.8f * glowIntensity, 0.9f * glowIntensity, 1.0f * glowIntensity);
+            glBegin(GL_LINES);
+            glVertex2f(pixelX + 1, pixelY + 1);
+            glVertex2f(pixelX + pixelSize - 1, pixelY + 1);
+            glEnd();
+        }
+    }
+    
+    // TOWER - brick style pixels (bigger and more prominent)
+    float towerStartX = centerX - 200;
+    float towerStartY = centerY - 50;
+    
+    // T letter pixels - bigger
+    int tPixels[][2] = {
+        {0,0}, {1,0}, {2,0}, {3,0}, {4,0}, {5,0}, {6,0},
+        {3,1}, {3,2}, {3,3}, {3,4}, {3,5}, {3,6}, {3,7}, {3,8}, {3,9}
+    };
+    
+    // O letter pixels - bigger
+    int oPixels[][2] = {
+        {9,1}, {10,1}, {11,1}, {12,1}, {13,1}, {14,1},
+        {8,2}, {15,2},
+        {8,3}, {15,3}, 
+        {8,4}, {15,4},
+        {8,5}, {15,5},
+        {8,6}, {15,6},
+        {8,7}, {15,7},
+        {9,8}, {10,8}, {11,8}, {12,8}, {13,8}, {14,8}
+    };
+    
+    // W letter pixels - bigger
+    int wPixels[][2] = {
+        {18,0}, {24,0},
+        {18,1}, {24,1},
+        {18,2}, {24,2},
+        {18,3}, {24,3},
+        {18,4}, {21,4}, {24,4},
+        {18,5}, {20,5}, {22,5}, {24,5},
+        {18,6}, {19,6}, {23,6}, {24,6},
+        {18,7}, {24,7},
+        {18,8}, {24,8},
+        {18,9}, {24,9}
+    };
+    
+    // E letter pixels - bigger
+    int ePixels[][2] = {
+        {27,0}, {28,0}, {29,0}, {30,0}, {31,0}, {32,0},
+        {27,1}, {27,2}, {27,3}, {27,4}, 
+        {27,5}, {28,5}, {29,5}, {30,5},
+        {27,6}, {27,7}, {27,8},
+        {27,9}, {28,9}, {29,9}, {30,9}, {31,9}, {32,9}
+    };
+    
+    // R letter pixels - bigger
+    int rPixels[][2] = {
+        {35,0}, {36,0}, {37,0}, {38,0}, {39,0},
+        {35,1}, {40,1},
+        {35,2}, {40,2},
+        {35,3}, {40,3},
+        {35,4}, {36,4}, {37,4}, {38,4},
+        {35,5}, {38,5},
+        {35,6}, {39,6},
+        {35,7}, {40,7},
+        {35,8}, {40,8},
+        {35,9}, {40,9}
+    };
+    
+    // Draw TOWER with brick colors
+    auto drawBrickPixel = [&](float px, float py) {
+        // Main brick color
+        glColor3f(0.6f, 0.3f, 0.2f);
+        glBegin(GL_QUADS);
+        glVertex2f(px, py);
+        glVertex2f(px + pixelSize, py);
+        glVertex2f(px + pixelSize, py + pixelSize);
+        glVertex2f(px, py + pixelSize);
+        glEnd();
+        
+        // Mortar lines
+        glColor3f(0.4f, 0.2f, 0.1f);
+        glBegin(GL_LINES);
+        glVertex2f(px, py); glVertex2f(px + pixelSize, py);
+        glVertex2f(px, py); glVertex2f(px, py + pixelSize);
+        glEnd();
+        
+        // Highlight
+        glColor3f(0.8f, 0.5f, 0.3f);
+        glBegin(GL_LINES);
+        glVertex2f(px + 1, py + 1);
+        glVertex2f(px + pixelSize - 1, py + 1);
+        glVertex2f(px + 1, py + 1);
+        glVertex2f(px + 1, py + pixelSize - 1);
+        glEnd();
+    };
+    
+    // Draw each letter with updated counts
+    for (int i = 0; i < 16; i++) { // T letter
+        drawBrickPixel(towerStartX + tPixels[i][0] * pixelSize, towerStartY - tPixels[i][1] * pixelSize);
+    }
+    for (int i = 0; i < 22; i++) { // O letter
+        drawBrickPixel(towerStartX + oPixels[i][0] * pixelSize, towerStartY - oPixels[i][1] * pixelSize);
+    }
+    for (int i = 0; i < 20; i++) { // W letter
+        drawBrickPixel(towerStartX + wPixels[i][0] * pixelSize, towerStartY - wPixels[i][1] * pixelSize);
+    }
+    for (int i = 0; i < 17; i++) { // E letter
+        drawBrickPixel(towerStartX + ePixels[i][0] * pixelSize, towerStartY - ePixels[i][1] * pixelSize);
+    }
+    for (int i = 0; i < 20; i++) { // R letter
+        drawBrickPixel(towerStartX + rPixels[i][0] * pixelSize, towerStartY - rPixels[i][1] * pixelSize);
+    }
+}
 
 // Brick-style UI panel with optional soft shadow
 void drawBrickPanelWithShadow(float x, float y, float width, float height, float r, float g, float b, float shadowAlpha = 0.25f) {
@@ -757,24 +1025,28 @@ void drawRocks() {
     }
 }
 
-// Draw collectables with 3D-like X-axis rotation illusion
+// Draw collectables with 3D-like Y-axis rotation illusion (3+ primitives: circle, line loop, triangle fan, quad)
 void drawCollectables() {
     for (const auto& collectable : collectables) {
         if (collectable.collected) continue;
-        
+
         glPushMatrix();
-        glTranslatef(collectable.x, collectable.y, 0);
-        
-        // X-axis flip illusion using Y-scale squash and overall size modulation
+
+        // Horizontal movement for odd-numbered coins (±20 pixels max)
+        float horizontalOffset = 0.0f;
+        if (collectable.index % 2 == 1) {
+            horizontalOffset = sinf(collectable.animTime * 2.0f) * 20.0f;
+        }
+
+        glTranslatef(collectable.x + horizontalOffset, collectable.y, 0);
+
+        // Y-axis flip illusion using X-scale squash and overall size modulation
         float t = (sinf(collectable.animTime * 4.0f) + 1.0f) * 0.5f; // 0..1
-        float yScale = 0.25f + 0.75f * t; // Thin at edge, full when face-on
+        float xScale = 0.25f + 0.75f * t; // Thin at edge, full when face-on
         float overall = 0.8f + 0.4f * t;  // Larger when face-on
-        glScalef(overall, overall * yScale, 1.0f);
-        
-        // Subtle wobble around Z to add life
-        glRotatef(sinf(collectable.animTime * 2.0f) * 8.0f, 0, 0, 1);
-        
-        // Base coin (ellipse due to Y scaling)
+        glScalef(overall * xScale, overall, 1.0f);
+
+        // Base coin (ellipse due to X scaling) - PRIMITIVE 1: Polygon
         glColor3f(1.0f, 0.82f, 0.1f);
         glBegin(GL_POLYGON);
         for (int i = 0; i < 24; i++) {
@@ -782,8 +1054,8 @@ void drawCollectables() {
             glVertex2f(10.0f * cosf(angle), 10.0f * sinf(angle));
         }
         glEnd();
-        
-        // Rim ring (line loop)
+
+        // Rim ring - PRIMITIVE 2: Line loop
         glColor3f(1.0f, 0.9f, 0.3f);
         glBegin(GL_LINE_LOOP);
         for (int i = 0; i < 24; i++) {
@@ -791,19 +1063,19 @@ void drawCollectables() {
             glVertex2f(9.0f * cosf(angle), 9.0f * sinf(angle));
         }
         glEnd();
-        
-        // Radial highlight (triangle fan gradient)
+
+        // Radial highlight - PRIMITIVE 3: Triangle fan gradient
         glBegin(GL_TRIANGLE_FAN);
         glColor3f(1.0f, 0.98f, 0.6f); // center bright
-        glVertex2f(0.0f, 2.0f); // slight offset for specular tilt
+        glVertex2f(0.0f, 0.0f); // centered for Y-axis rotation
         glColor3f(1.0f, 0.85f, 0.2f); // outer gold
         for (int i = 0; i <= 24; i++) {
             float angle = 2.0f * M_PI * i / 24;
             glVertex2f(10.0f * cosf(angle), 10.0f * sinf(angle));
         }
         glEnd();
-        
-        // Specular streak across face
+
+        // Specular streak across face - PRIMITIVE 4: Quad
         glColor4f(1.0f, 1.0f, 1.0f, 0.35f);
         glBegin(GL_QUADS);
         glVertex2f(-7.0f, 3.0f);
@@ -811,7 +1083,7 @@ void drawCollectables() {
         glVertex2f(7.0f, 1.0f);
         glVertex2f(-7.0f, 1.0f);
         glEnd();
-        
+
         // Edge darkening when thin (simulates depth)
         float edgeAlpha = 1.0f - t; // stronger when thinner
         glColor4f(0.6f, 0.4f, 0.1f, 0.4f * edgeAlpha);
@@ -821,7 +1093,7 @@ void drawCollectables() {
             glVertex2f(10.5f * cosf(angle), 10.5f * sinf(angle));
         }
         glEnd();
-        
+
         glPopMatrix();
     }
 }
@@ -1380,204 +1652,328 @@ void drawHUD() {
 void drawGameOver() {
     float t = menuAnimTime;
     
-    // Dark animated gradient background
+    // Use the Vice City background but with darker overlay
+    drawLayeredBackground();
+    
+    // Dark red overlay for game over effect
+    glColor4f(0.3f, 0.0f, 0.0f, 0.4f + 0.2f * sin(t * 2.0f));
     glBegin(GL_QUADS);
-    glColor3f(0.05f, 0.0f, 0.0f);
-    glVertex2f(0, HEIGHT);
-    glVertex2f(WIDTH, HEIGHT);
-    glColor3f(0.15f + 0.05f * sin(t * 2.0f), 0.0f, 0.0f);
-    glVertex2f(WIDTH, HEIGHT / 2);
-    glVertex2f(0, HEIGHT / 2);
-    glEnd();
-
-    glBegin(GL_QUADS);
-    glColor3f(0.15f + 0.05f * sin(t * 2.0f), 0.0f, 0.0f);
-    glVertex2f(0, HEIGHT / 2);
-    glVertex2f(WIDTH, HEIGHT / 2);
-    glColor3f(0.02f, 0.0f, 0.0f);
-    glVertex2f(WIDTH, 0);
     glVertex2f(0, 0);
+    glVertex2f(WIDTH, 0);
+    glVertex2f(WIDTH, HEIGHT);
+    glVertex2f(0, HEIGHT);
     glEnd();
 
-    // Subtle scanline/flicker effect
-    glColor4f(0.6f, 0.0f, 0.0f, 0.15f);
-    for (int i = 0; i < HEIGHT; i += 8) {
-        float offset = fmod(t * 40.0f, 8.0f);
-        glBegin(GL_LINES);
-        glVertex2f(0, i + offset);
-        glVertex2f(WIDTH, i + offset);
-        glEnd();
-    }
-
-    // Skull icon in the background
+    // Big GAME OVER logo with dramatic effect
+    float logoScale = 0.8f + 0.1f * sin(t * 2.0f);
+    float jitterX = sin(t * 8.0f) * 3.0f;
+    float jitterY = cos(t * 6.0f) * 2.0f;
+    
     glPushMatrix();
-    glTranslatef(WIDTH / 2.0f, HEIGHT / 2.0f + 40.0f, 0);
-    float pulse = 0.9f + 0.1f * sin(t * 3.0f);
-    glScalef(2.0f * pulse, 2.0f * pulse, 1.0f);
-    // Head
-    glColor3f(0.9f, 0.9f, 0.9f);
-    glBegin(GL_POLYGON);
-    for (int i = 0; i < 24; i++) {
-        float a = 2.0f * M_PI * i / 24;
-        glVertex2f(0 + 18 * cos(a), 10 + 18 * sin(a));
-    }
-    glEnd();
-    // Jaw
+    glTranslatef(WIDTH / 2.0f + jitterX, HEIGHT / 2 + 150 + jitterY, 0);
+    glScalef(logoScale, logoScale, 1.0f);
+    
+    // GAME text
+    glColor3f(1.0f, 0.2f + 0.3f * sin(t * 3.0f), 0.0f);
     glBegin(GL_QUADS);
-    glVertex2f(-12, -2);
-    glVertex2f(12, -2);
-    glVertex2f(12, -12);
-    glVertex2f(-12, -12);
+    // G
+    glVertex2f(-120, 40); glVertex2f(-80, 40); glVertex2f(-80, 30); glVertex2f(-120, 30);
+    glVertex2f(-120, 30); glVertex2f(-110, 30); glVertex2f(-110, -20); glVertex2f(-120, -20);
+    glVertex2f(-120, -20); glVertex2f(-80, -20); glVertex2f(-80, -30); glVertex2f(-120, -30);
+    glVertex2f(-90, 0); glVertex2f(-80, 0); glVertex2f(-80, -20); glVertex2f(-90, -20);
+    glVertex2f(-100, -10); glVertex2f(-80, -10); glVertex2f(-80, -20); glVertex2f(-100, -20);
+    
+    // A
+    glVertex2f(-70, -30); glVertex2f(-60, -30); glVertex2f(-45, 40); glVertex2f(-55, 40);
+    glVertex2f(-45, 40); glVertex2f(-35, 40); glVertex2f(-20, -30); glVertex2f(-30, -30);
+    glVertex2f(-55, 10); glVertex2f(-35, 10); glVertex2f(-35, 0); glVertex2f(-55, 0);
+    
+    // M
+    glVertex2f(-10, 40); glVertex2f(0, 40); glVertex2f(0, -30); glVertex2f(-10, -30);
+    glVertex2f(20, 40); glVertex2f(30, 40); glVertex2f(30, -30); glVertex2f(20, -30);
+    glVertex2f(0, 30); glVertex2f(10, 40); glVertex2f(20, 30); glVertex2f(10, 20);
+    
+    // E
+    glVertex2f(40, 40); glVertex2f(80, 40); glVertex2f(80, 30); glVertex2f(40, 30);
+    glVertex2f(40, 30); glVertex2f(50, 30); glVertex2f(50, 10); glVertex2f(40, 10);
+    glVertex2f(40, 10); glVertex2f(70, 10); glVertex2f(70, 0); glVertex2f(40, 0);
+    glVertex2f(40, 0); glVertex2f(50, 0); glVertex2f(50, -20); glVertex2f(40, -20);
+    glVertex2f(40, -20); glVertex2f(80, -20); glVertex2f(80, -30); glVertex2f(40, -30);
     glEnd();
-    // Eyes (holes)
-    glColor3f(0.1f, 0.0f, 0.0f);
-    glBegin(GL_POLYGON);
-    for (int i = 0; i < 12; i++) {
-        float a = 2.0f * M_PI * i / 12;
-        glVertex2f(-7 + 5 * cos(a), 8 + 5 * sin(a));
-    }
+    
+    glPopMatrix();
+    
+    // OVER text
+    glPushMatrix();
+    glTranslatef(WIDTH / 2.0f + jitterX, HEIGHT / 2 + 80 + jitterY, 0);
+    glScalef(logoScale * 0.8f, logoScale * 0.8f, 1.0f);
+    
+    glColor3f(0.8f, 0.0f, 0.0f);
+    glBegin(GL_QUADS);
+    // O
+    glVertex2f(-80, 30); glVertex2f(-40, 30); glVertex2f(-40, 20); glVertex2f(-80, 20);
+    glVertex2f(-80, 20); glVertex2f(-70, 20); glVertex2f(-70, -20); glVertex2f(-80, -20);
+    glVertex2f(-50, 20); glVertex2f(-40, 20); glVertex2f(-40, -20); glVertex2f(-50, -20);
+    glVertex2f(-80, -20); glVertex2f(-40, -20); glVertex2f(-40, -30); glVertex2f(-80, -30);
+    
+    // V
+    glVertex2f(-30, 30); glVertex2f(-20, 30); glVertex2f(-5, -30); glVertex2f(-15, -30);
+    glVertex2f(5, 30); glVertex2f(15, 30); glVertex2f(0, -30); glVertex2f(-10, -30);
+    
+    // E
+    glVertex2f(25, 30); glVertex2f(65, 30); glVertex2f(65, 20); glVertex2f(25, 20);
+    glVertex2f(25, 20); glVertex2f(35, 20); glVertex2f(35, 5); glVertex2f(25, 5);
+    glVertex2f(25, 5); glVertex2f(55, 5); glVertex2f(55, -5); glVertex2f(25, -5);
+    glVertex2f(25, -5); glVertex2f(35, -5); glVertex2f(35, -20); glVertex2f(25, -20);
+    glVertex2f(25, -20); glVertex2f(65, -20); glVertex2f(65, -30); glVertex2f(25, -30);
+    
+    // R
+    glVertex2f(75, 30); glVertex2f(115, 30); glVertex2f(115, 20); glVertex2f(75, 20);
+    glVertex2f(75, 20); glVertex2f(85, 20); glVertex2f(85, 5); glVertex2f(75, 5);
+    glVertex2f(75, 5); glVertex2f(105, 5); glVertex2f(105, -5); glVertex2f(75, -5);
+    glVertex2f(95, 5); glVertex2f(105, 5); glVertex2f(115, -30); glVertex2f(105, -30);
+    glVertex2f(75, -5); glVertex2f(85, -5); glVertex2f(85, -30); glVertex2f(75, -30);
+    glVertex2f(105, 20); glVertex2f(115, 20); glVertex2f(115, 5); glVertex2f(105, 5);
     glEnd();
-    glBegin(GL_POLYGON);
-    for (int i = 0; i < 12; i++) {
-        float a = 2.0f * M_PI * i / 12;
-        glVertex2f(7 + 5 * cos(a), 8 + 5 * sin(a));
-    }
-    glEnd();
-    // Nose (triangle)
-    glBegin(GL_TRIANGLES);
-    glVertex2f(0, 4);
-    glVertex2f(-3, 0);
-    glVertex2f(3, 0);
-    glEnd();
+    
     glPopMatrix();
 
-    // Title with glow and slight jitter
-    float jitterX = sin(t * 8.0f) * 2.0f;
-    float jitterY = cos(t * 6.0f) * 2.0f;
-    drawShadowedText(WIDTH / 2 - 70 + jitterX, HEIGHT / 2 + 90 + jitterY, "GAME OVER", 1.0f, 0.2f + 0.2f * sin(t * 3.0f), 0.2f);
-
-    // Stats panels
-    drawBrickPanelWithShadow(WIDTH / 2 - 120, HEIGHT / 2 + 35, 240, 28, 0.5f, 0.2f, 0.2f);
+    // Interactive buttons (same as win screen)
+    float buttonY = HEIGHT / 2 - 50;
+    float buttonSpacing = 80;
+    
+    auto drawGameOverButton = [&](const char* label, bool selected, float y) {
+        float buttonWidth = 200;
+        float buttonHeight = 50;
+        float buttonX = WIDTH / 2 - buttonWidth / 2;
+        
+        if (selected) {
+            // Selected button - red glowing effect for game over
+            drawBrickPanelWithShadow(buttonX, y, buttonWidth, buttonHeight, 0.8f, 0.2f, 0.2f, 0.5f);
+            glColor4f(1.0f, 0.0f, 0.0f, 0.3f + 0.2f * sin(t * 5.0f));
+            glBegin(GL_QUADS);
+            glVertex2f(buttonX - 5, y - 5);
+            glVertex2f(buttonX + buttonWidth + 5, y - 5);
+            glVertex2f(buttonX + buttonWidth + 5, y + buttonHeight + 5);
+            glVertex2f(buttonX - 5, y + buttonHeight + 5);
+            glEnd();
+            drawShadowedTextCentered(WIDTH / 2.0f, y + 30, label, 1.0f, 1.0f, 0.0f);
+        } else {
+            drawBrickPanelWithShadow(buttonX, y, buttonWidth, buttonHeight, 0.3f, 0.3f, 0.3f);
+            drawShadowedTextCentered(WIDTH / 2.0f, y + 30, label, 0.7f, 0.7f, 0.7f);
+        }
+    };
+    
+    drawGameOverButton("TRY AGAIN", currentWinLoseButton == BUTTON_RESTART, buttonY);
+    drawGameOverButton("EXIT GAME", currentWinLoseButton == BUTTON_EXIT, buttonY - buttonSpacing);
+    
+    // Stats in smaller panel at the bottom
     std::stringstream ss;
-    ss << "Final Score: " << score;
-    drawShadowedText(WIDTH / 2 - 90, HEIGHT / 2 + 55, ss.str().c_str(), 1.0f, 0.95f, 0.95f);
-
+    ss << "Score: " << score << " | ";
+    
     int collected = 0;
     for (const auto& c : collectables) if (c.collected) collected++;
-    drawBrickPanelWithShadow(WIDTH / 2 - 140, HEIGHT / 2 - 5, 280, 28, 0.45f, 0.2f, 0.2f);
-    std::stringstream collectSS;
-    collectSS << "Coins Collected: " << collected << "/" << collectables.size();
-    drawShadowedText(WIDTH / 2 - 115, HEIGHT / 2 + 15, collectSS.str().c_str(), 1.0f, 0.95f, 0.95f);
-
-    drawBrickPanelWithShadow(WIDTH / 2 - 140, HEIGHT / 2 - 45, 280, 28, 0.4f, 0.15f, 0.15f);
-    std::stringstream timeSS;
-    timeSS << "Survival Time: " << (int)gameTime << "s";
-    drawShadowedText(WIDTH / 2 - 85, HEIGHT / 2 - 25, timeSS.str().c_str(), 1.0f, 0.9f, 0.9f);
-
-    // Message and instructions
-    if (collected >= 5) {
-        drawShadowedText(WIDTH / 2 - 120, HEIGHT / 2 - 75, "Great job! You found the key!", 0.3f, 1.0f, 0.3f);
-    } else {
-        drawShadowedText(WIDTH / 2 - 150, HEIGHT / 2 - 75, "Try to collect more coins next time!", 1.0f, 0.8f, 0.3f);
-    }
-    drawBrickPanelWithShadow(WIDTH / 2 - 170, HEIGHT / 2 - 105, 340, 28, 0.25f, 0.25f, 0.35f);
-    drawShadowedText(WIDTH / 2 - 150, HEIGHT / 2 - 85, "Press R to restart or ESC to exit", 0.9f, 0.9f, 0.9f);
+    ss << "Coins: " << collected << "/" << collectables.size() << " | ";
+    ss << "Time: " << (int)gameTime << "s";
+    
+    float statsWidth = measureTextWidth(ss.str().c_str()) + 40;
+    drawBrickPanelWithShadow(WIDTH / 2 - statsWidth/2, 50, statsWidth, 32, 0.3f, 0.2f, 0.2f, 0.4f);
+    drawShadowedTextCentered(WIDTH / 2.0f, 70, ss.str().c_str(), 0.9f, 0.7f, 0.7f);
 }
 
 // Draw game win screen (stylized)
 void drawGameWin() {
     float t = menuAnimTime;
-
-    // Radiant gradient background
-    glBegin(GL_QUADS);
-    glColor3f(0.0f, 0.25f, 0.1f + 0.1f * sin(t * 1.5f));
-    glVertex2f(0, HEIGHT);
-    glVertex2f(WIDTH, HEIGHT);
-    glColor3f(0.0f, 0.35f, 0.2f);
-    glVertex2f(WIDTH, HEIGHT / 2);
-    glVertex2f(0, HEIGHT / 2);
-    glEnd();
-
-    glBegin(GL_QUADS);
-    glColor3f(0.0f, 0.35f, 0.2f);
-    glVertex2f(0, HEIGHT / 2);
-    glVertex2f(WIDTH, HEIGHT / 2);
-    glColor3f(0.0f, 0.15f, 0.1f);
-    glVertex2f(WIDTH, 0);
-    glVertex2f(0, 0);
-    glEnd();
-
-    // Radiating starburst lines
-    glColor4f(1.0f, 1.0f, 0.4f, 0.35f);
-    glPushMatrix();
-    glTranslatef(WIDTH / 2.0f, HEIGHT / 2.0f + 40.0f, 0);
-    for (int i = 0; i < 24; i++) {
-        float a = i * (2.0f * M_PI / 24.0f) + t * 0.8f;
-        float r1 = 20.0f + 5.0f * sin(t * 3.0f + i);
-        float r2 = 220.0f + 10.0f * sin(t * 2.0f + i * 0.5f);
-        glBegin(GL_LINES);
-        glVertex2f(r1 * cos(a), r1 * sin(a));
-        glVertex2f(r2 * cos(a), r2 * sin(a));
-        glEnd();
+    
+    // Use the same Vice City background as other screens
+    drawLayeredBackground();
+    
+    // Update and draw falling characters
+    characterSpawnTimer += 0.016f;
+    if (characterSpawnTimer > 0.3f && fallingCharacters.size() < 15) {
+        FallingCharacter newChar;
+        newChar.x = rand() % WIDTH;
+        newChar.y = HEIGHT + 50;
+        newChar.type = (CharacterType)(rand() % 3); // Random character type
+        newChar.rotationSpeed = (rand() % 60) + 30; // 30-90 degrees per second
+        newChar.rotation = 0;
+        newChar.fallSpeed = (rand() % 100) + 150; // 150-250 pixels per second
+        newChar.scale = 0.5f + (rand() % 50) / 100.0f; // 0.5 to 1.0 scale
+        newChar.active = true;
+        fallingCharacters.push_back(newChar);
+        characterSpawnTimer = 0.0f;
     }
-    glPopMatrix();
-
-    // Confetti
-    for (int i = 0; i < 40; i++) {
-        float ang = i * (2.0f * M_PI / 40.0f) + t * (0.8f + 0.2f * (i % 5));
-        float rad = 60.0f + 20.0f * sin(t * 1.7f + i);
-        float cx = WIDTH / 2 + (150 + rad) * cos(ang);
-        float cy = HEIGHT / 2 + 40 + (120 + rad) * sin(ang);
-        float rot = t * (50 + i * 3);
+    
+    // Update falling characters
+    for (auto& character : fallingCharacters) {
+        if (!character.active) continue;
+        
+        character.y -= character.fallSpeed * 0.016f;
+        character.rotation += character.rotationSpeed * 0.016f;
+        
+        if (character.y < -100) {
+            character.active = false;
+        }
+        
+        // Draw the falling character
         glPushMatrix();
-        glTranslatef(cx, cy, 0);
-        glRotatef(rot, 0, 0, 1);
-        float cr = 0.5f + 0.5f * sin(i + t);
-        float cg = 0.5f + 0.5f * sin(i * 1.3f + t * 0.8f);
-        float cb = 0.5f + 0.5f * sin(i * 0.7f + t * 1.2f);
-        glColor3f(cr, cg, cb);
-        glBegin(GL_TRIANGLES);
-        glVertex2f(0, 0);
-        glVertex2f(8, 3);
-        glVertex2f(3, 8);
-        glEnd();
+        glTranslatef(character.x, character.y, 0);
+        glRotatef(character.rotation, 0, 0, 1);
+        glScalef(character.scale, character.scale, 1.0f);
+        
+        // Add transparency
+        glEnable(GL_BLEND);
+        glColor4f(1.0f, 1.0f, 1.0f, 0.7f);
+        
+        switch (character.type) {
+            case WITCH:
+                drawWitch(0, 0, true);
+                break;
+            case FOOTBALLER:
+                drawFootballer(0, 0, true);
+                break;
+            case BUSINESSMAN:
+                drawBusinessman(0, 0, true);
+                break;
+        }
+        
         glPopMatrix();
     }
+    
+    // Remove inactive characters
+    fallingCharacters.erase(
+        std::remove_if(fallingCharacters.begin(), fallingCharacters.end(),
+                      [](const FallingCharacter& c) { return !c.active; }),
+        fallingCharacters.end());
+    
+    // Victory celebration background effect
+    glColor4f(1.0f, 1.0f, 0.0f, 0.1f + 0.1f * sin(t * 3.0f));
+    glBegin(GL_QUADS);
+    glVertex2f(0, 0);
+    glVertex2f(WIDTH, 0);
+    glVertex2f(WIDTH, HEIGHT);
+    glVertex2f(0, HEIGHT);
+    glEnd();
 
-    // Titles with glow
-    drawShadowedText(WIDTH / 2 - 100, HEIGHT / 2 + 100, "CONGRATULATIONS!", 0.3f + 0.7f * fabs(sin(t)), 1.0f, 0.3f);
-    drawShadowedText(WIDTH / 2 - 50, HEIGHT / 2 + 70, "YOU WIN!", 1.0f, 1.0f, 0.0f);
-
-    // Stats panels
-    drawBrickPanelWithShadow(WIDTH / 2 - 120, HEIGHT / 2 + 25, 240, 28, 0.2f, 0.6f, 0.2f);
-    std::stringstream ss;
-    ss << "Final Score: " << score;
-    drawShadowedText(WIDTH / 2 - 90, HEIGHT / 2 + 45, ss.str().c_str(), 1.0f, 1.0f, 1.0f);
-
-    int collected = 0;
-    for (const auto& c : collectables) if (c.collected) collected++;
-    drawBrickPanelWithShadow(WIDTH / 2 - 140, HEIGHT / 2 - 15, 280, 28, 0.25f, 0.6f, 0.25f);
-    std::stringstream collectSS;
-    collectSS << "Coins Collected: " << collected << "/" << collectables.size();
-    drawShadowedText(WIDTH / 2 - 115, HEIGHT / 2 + 5, collectSS.str().c_str(), 1.0f, 1.0f, 1.0f);
-
-    drawBrickPanelWithShadow(WIDTH / 2 - 140, HEIGHT / 2 - 55, 280, 28, 0.2f, 0.5f, 0.4f);
-    std::stringstream timeSS;
-    timeSS << "Completion Time: " << (int)gameTime << "s";
-    drawShadowedText(WIDTH / 2 - 95, HEIGHT / 2 - 35, timeSS.str().c_str(), 1.0f, 1.0f, 1.0f);
-
-    // Performance flair
-    if (gameTime < 60) {
-        drawShadowedText(WIDTH / 2 - 60, HEIGHT / 2 - 85, "SPEED RUNNER!", 0.2f, 0.8f, 1.0f);
-    } else if (collected == (int)collectables.size()) {
-        drawShadowedText(WIDTH / 2 - 80, HEIGHT / 2 - 85, "PERFECT COLLECTOR!", 1.0f, 0.9f, 0.2f);
-    } else {
-        drawShadowedText(WIDTH / 2 - 70, HEIGHT / 2 - 85, "TOWER CONQUERED!", 0.6f, 0.8f, 1.0f);
+    // Celebration sparkles around the screen edges
+    for (int i = 0; i < 20; i++) {
+        float angle = i * (2.0f * M_PI / 20.0f) + t * 2.0f;
+        float radius = 100 + 50 * sin(t * 3.0f + i);
+        float sparkleX = WIDTH / 2 + radius * cos(angle);
+        float sparkleY = HEIGHT / 2 + radius * sin(angle);
+        
+        float sparkleSize = 3 + 2 * sin(t * 5.0f + i);
+        glColor4f(1.0f, 1.0f, 0.0f, 0.8f);
+        glBegin(GL_QUADS);
+        glVertex2f(sparkleX - sparkleSize, sparkleY - sparkleSize);
+        glVertex2f(sparkleX + sparkleSize, sparkleY - sparkleSize);
+        glVertex2f(sparkleX + sparkleSize, sparkleY + sparkleSize);
+        glVertex2f(sparkleX - sparkleSize, sparkleY + sparkleSize);
+        glEnd();
     }
 
-    // Instructions
-    drawBrickPanelWithShadow(WIDTH / 2 - 170, HEIGHT / 2 - 115, 340, 28, 0.25f, 0.25f, 0.35f);
-    drawShadowedText(WIDTH / 2 - 150, HEIGHT / 2 - 95, "Press R to restart or ESC to exit", 0.95f, 0.95f, 0.95f);
+    // Big YOU WIN logo - simpler and cleaner
+    float logoScale = 1.0f + 0.1f * sin(t * 2.0f);
+    
+    // YOU text
+    glPushMatrix();
+    glTranslatef(WIDTH / 2.0f, HEIGHT / 2 + 150, 0);
+    glScalef(logoScale, logoScale, 1.0f);
+    
+    glColor3f(1.0f, 0.8f + 0.2f * sin(t * 3.0f), 0.0f);
+    
+    // Draw "YOU" using text-like rectangles
+    // Y
+    glBegin(GL_QUADS);
+    glVertex2f(-80, 40); glVertex2f(-70, 40); glVertex2f(-55, 10); glVertex2f(-65, 10);
+    glVertex2f(-45, 40); glVertex2f(-35, 40); glVertex2f(-50, 10); glVertex2f(-60, 10);
+    glVertex2f(-62, 10); glVertex2f(-53, 10); glVertex2f(-53, -40); glVertex2f(-62, -40);
+    
+    // O
+    glVertex2f(-25, 40); glVertex2f(5, 40); glVertex2f(5, 30); glVertex2f(-25, 30);
+    glVertex2f(-25, 30); glVertex2f(-15, 30); glVertex2f(-15, -30); glVertex2f(-25, -30);
+    glVertex2f(-5, 30); glVertex2f(5, 30); glVertex2f(5, -30); glVertex2f(-5, -30);
+    glVertex2f(-25, -30); glVertex2f(5, -30); glVertex2f(5, -40); glVertex2f(-25, -40);
+    
+    // U
+    glVertex2f(15, 40); glVertex2f(25, 40); glVertex2f(25, -30); glVertex2f(15, -30);
+    glVertex2f(45, 40); glVertex2f(55, 40); glVertex2f(55, -30); glVertex2f(45, -30);
+    glVertex2f(15, -30); glVertex2f(55, -30); glVertex2f(55, -40); glVertex2f(15, -40);
+    glEnd();
+    
+    glPopMatrix();
+    
+    // WIN text
+    glPushMatrix();
+    glTranslatef(WIDTH / 2.0f, HEIGHT / 2 + 60, 0);
+    glScalef(logoScale, logoScale, 1.0f);
+    
+    glColor3f(0.0f, 1.0f, 0.5f + 0.5f * sin(t * 4.0f));
+    
+    // Draw "WIN"
+    glBegin(GL_QUADS);
+    // W
+    glVertex2f(-90, 40); glVertex2f(-80, 40); glVertex2f(-80, -40); glVertex2f(-90, -40);
+    glVertex2f(-55, 40); glVertex2f(-45, 40); glVertex2f(-45, -40); glVertex2f(-55, -40);
+    glVertex2f(-80, -20); glVertex2f(-72, -20); glVertex2f(-65, -40); glVertex2f(-73, -40);
+    glVertex2f(-72, -20); glVertex2f(-62, -20); glVertex2f(-55, -40); glVertex2f(-63, -40);
+    
+    // I
+    glVertex2f(-30, 40); glVertex2f(0, 40); glVertex2f(0, 30); glVertex2f(-30, 30);
+    glVertex2f(-20, 30); glVertex2f(-10, 30); glVertex2f(-10, -30); glVertex2f(-20, -30);
+    glVertex2f(-30, -30); glVertex2f(0, -30); glVertex2f(0, -40); glVertex2f(-30, -40);
+    
+    // N
+    glVertex2f(15, 40); glVertex2f(25, 40); glVertex2f(25, -40); glVertex2f(15, -40);
+    glVertex2f(55, 40); glVertex2f(65, 40); glVertex2f(65, -40); glVertex2f(55, -40);
+    glVertex2f(25, 30); glVertex2f(35, 40); glVertex2f(45, 30); glVertex2f(35, 20);
+    glVertex2f(25, 10); glVertex2f(35, 20); glVertex2f(45, 10); glVertex2f(35, 0);
+    glVertex2f(25, -10); glVertex2f(35, 0); glVertex2f(45, -10); glVertex2f(35, -20);
+    glEnd();
+    
+    glPopMatrix();
+
+    // Interactive buttons
+    float buttonY = HEIGHT / 2 - 50;
+    float buttonSpacing = 80;
+    
+    auto drawWinButton = [&](const char* label, bool selected, float y) {
+        float buttonWidth = 200;
+        float buttonHeight = 50;
+        float buttonX = WIDTH / 2 - buttonWidth / 2;
+        
+        if (selected) {
+            // Selected button - glowing effect
+            drawBrickPanelWithShadow(buttonX, y, buttonWidth, buttonHeight, 0.2f, 0.8f, 0.2f, 0.5f);
+            glColor4f(0.0f, 1.0f, 0.0f, 0.3f + 0.2f * sin(t * 5.0f));
+            glBegin(GL_QUADS);
+            glVertex2f(buttonX - 5, y - 5);
+            glVertex2f(buttonX + buttonWidth + 5, y - 5);
+            glVertex2f(buttonX + buttonWidth + 5, y + buttonHeight + 5);
+            glVertex2f(buttonX - 5, y + buttonHeight + 5);
+            glEnd();
+            drawShadowedTextCentered(WIDTH / 2.0f, y + 30, label, 1.0f, 1.0f, 0.0f);
+        } else {
+            drawBrickPanelWithShadow(buttonX, y, buttonWidth, buttonHeight, 0.5f, 0.5f, 0.5f);
+            drawShadowedTextCentered(WIDTH / 2.0f, y + 30, label, 0.85f, 0.85f, 0.85f);
+        }
+    };
+    
+    drawWinButton("PLAY AGAIN", currentWinLoseButton == BUTTON_RESTART, buttonY);
+    drawWinButton("EXIT GAME", currentWinLoseButton == BUTTON_EXIT, buttonY - buttonSpacing);
+    
+    // Stats in smaller panels at the bottom
+    std::stringstream ss;
+    ss << "Score: " << score << " | ";
+    
+    int collected = 0;
+    for (const auto& c : collectables) if (c.collected) collected++;
+    ss << "Coins: " << collected << "/" << collectables.size() << " | ";
+    ss << "Time: " << (int)gameTime << "s";
+    
+    float statsWidth = measureTextWidth(ss.str().c_str()) + 40;
+    drawBrickPanelWithShadow(WIDTH / 2 - statsWidth/2, 50, statsWidth, 32, 0.3f, 0.3f, 0.4f, 0.3f);
+    drawShadowedTextCentered(WIDTH / 2.0f, 70, ss.str().c_str(), 0.9f, 0.9f, 0.9f);
 }
 
 // Update game logic
@@ -1597,27 +1993,53 @@ void update(float deltaTime) {
         }
     }
     
-    // Update player physics - balanced for challenge
-    player.velocityY -= 750.0f * deltaTime; // Slightly more gravity
-    player.x += player.velocityX * deltaTime;
-    player.y += player.velocityY * deltaTime;
-    
-    // Boundary checking
-    if (player.x < 0) player.x = 0;
-    if (player.x + player.width > WIDTH) player.x = WIDTH - player.width;
-    
-    // Platform collision
-    player.onGround = false;
-    for (const auto& platform : platforms) {
-        if (!platform.active) continue;
+    // Skip normal physics if player is being sucked into door
+    if (!playerBeingSucked) {
+        // Update player physics - balanced for challenge
+        player.velocityY -= 750.0f * deltaTime; // Slightly more gravity
+
+        // Smooth continuous movement with acceleration
+        float acceleration = 1200.0f; // Acceleration rate
+        float maxSpeed = 280.0f; // Maximum horizontal speed
+        float deceleration = player.onGround ? 0.80f : 0.92f; // Different deceleration on ground vs air
         
-        if (checkCollision(player.x, player.y, player.width, player.height,
-                         platform.x, platform.y, platform.width, platform.height)) {
-            if (player.velocityY <= 0 && player.y > platform.y) {
-                player.y = platform.y + platform.height;
-                player.velocityY = 0;
-                player.onGround = true;
-                player.hasDoubleJumped = false;
+        // Apply movement based on key states
+        if (leftPressed) {
+            player.velocityX -= acceleration * deltaTime;
+            if (player.velocityX < -maxSpeed) player.velocityX = -maxSpeed;
+        } else if (rightPressed) {
+            player.velocityX += acceleration * deltaTime;
+            if (player.velocityX > maxSpeed) player.velocityX = maxSpeed;
+        } else {
+            // Decelerate when no keys pressed
+            player.velocityX *= deceleration;
+            // Stop tiny velocities to avoid jitter
+            if (fabs(player.velocityX) < 5.0f) player.velocityX = 0.0f;
+        }
+
+        player.x += player.velocityX * deltaTime;
+        player.y += player.velocityY * deltaTime;
+    }
+    
+    // Skip boundary checking and collisions during suction
+    if (!playerBeingSucked) {
+        // Boundary checking
+        if (player.x < 0) player.x = 0;
+        if (player.x + player.width > WIDTH) player.x = WIDTH - player.width;
+        
+        // Platform collision
+        player.onGround = false;
+        for (const auto& platform : platforms) {
+            if (!platform.active) continue;
+            
+            if (checkCollision(player.x, player.y, player.width, player.height,
+                             platform.x, platform.y, platform.width, platform.height)) {
+                if (player.velocityY <= 0 && player.y > platform.y) {
+                    player.y = platform.y + platform.height;
+                    player.velocityY = 0;
+                    player.onGround = true;
+                    player.hasDoubleJumped = false;
+                }
             }
         }
     }
@@ -1652,7 +2074,7 @@ void update(float deltaTime) {
     rockSpawnTimer -= deltaTime;
     if (rockSpawnTimer <= 0) {
         rocks.push_back({(float)(rand() % (WIDTH - 20)), (float)HEIGHT, true});
-        rockSpawnTimer = 1.2f + (rand() % 140) / 100.0f; // 1.2s - 2.6s
+        rockSpawnTimer = 0.8f + (rand() % 80) / 100.0f; // 0.8s - 1.6s (more frequent)
     }
     
     // Update rocks
@@ -1783,19 +2205,53 @@ void update(float deltaTime) {
                                  [](const PowerUp& p) { return !p.active; }), powerUps.end());
     
     // Win condition - player entering the door
-    if (keyCollected && !doorIsEntering) {
+    if (keyCollected && !doorIsEntering && !playerBeingSucked) {
         float doorX = WIDTH / 2 - 40;
         float doorY = HEIGHT - 120;
         if (checkCollision(player.x, player.y, player.width, player.height,
                          doorX, doorY, 80, 120)) {
-            doorIsEntering = true;
-            doorEnterAnimTime = 0.0f;
+            // Start suction animation
+            playerBeingSucked = true;
+            suctionAnimTime = 0.0f;
+            suctionStartX = player.x;
+            suctionStartY = player.y;
+            doorCenterX = doorX + 40; // Center of door
+            doorCenterY = doorY + 60;
         }
+    }
+    
+    // Update suction animation
+    if (playerBeingSucked) {
+        suctionAnimTime += deltaTime;
+        
+        // Animation duration: 2 seconds
+        float suctionDuration = 2.0f;
+        float progress = std::min(1.0f, suctionAnimTime / suctionDuration);
+        
+        if (progress < 1.0f) {
+            // Freeze everything - don't update normal physics
+            // Move player towards door center with easing
+            float easeProgress = 1.0f - (1.0f - progress) * (1.0f - progress); // Ease in
+            
+            player.x = suctionStartX + (doorCenterX - suctionStartX) * easeProgress;
+            player.y = suctionStartY + (doorCenterY - suctionStartY) * easeProgress;
+            
+            // Fast clockwise rotation
+            playerFlipAngle = -progress * 720.0f * 3.0f; // Multiple fast spins
+        } else {
+            // Animation complete - trigger win
+            gameState = GAME_WIN;
+            initFallingCharacters(); // Initialize falling characters for win screen
+        }
+        
+        // Don't update other game elements during suction
+        return;
     }
     
     // Complete win after entrance animation finishes
     if (doorIsEntering && doorEnterAnimTime >= 1.5f) {
         gameState = GAME_WIN;
+        initFallingCharacters(); // Initialize falling characters for win screen
     }
 }
 
@@ -1847,6 +2303,26 @@ void keyboard(unsigned char key, int x, int y) {
                         gameState = START_MENU;
                         break;
                 }
+            } else if (gameState == GAME_OVER || gameState == GAME_WIN) {
+                switch (currentWinLoseButton) {
+                    case BUTTON_RESTART:
+                        gameState = PLAYING;
+                        score = 0;
+                        playerLives = 3;
+                        gameTime = 0;
+                        lavaHeight = 50;
+                        keySpawned = false;
+                        keyCollected = false;
+                        currentWinLoseButton = BUTTON_RESTART; // Reset button selection
+                        if (gameState == GAME_WIN) {
+                            initFallingCharacters(); // Clear falling characters
+                        }
+                        initGame();
+                        break;
+                    case BUTTON_EXIT:
+                        exit(0);
+                        break;
+                }
             }
             break;
         case 'r':
@@ -1855,18 +2331,30 @@ void keyboard(unsigned char key, int x, int y) {
                 gameState = START_MENU;
             }
             break;
+        case 'a':
+        case 'A':
+            if (gameState == PLAYING && !playerBeingSucked) {
+                leftPressed = true;
+            }
+            break;
+        case 'd':
+        case 'D':
+            if (gameState == PLAYING && !playerBeingSucked) {
+                rightPressed = true;
+            }
+            break;
         case 'w':
         case 'W':
         case ' ':
-            if (gameState == PLAYING) {
+            if (gameState == PLAYING && !playerBeingSucked) {
                 if (player.onGround) {
-                    player.velocityY = 430; // Balanced jump
+                    player.velocityY = 400; // Slightly lower jump
                     player.onGround = false;
                     // Start flip
                     playerAirTime = 0.0f;
                     playerFlipAngle = 0.0f;
                 } else if (player.canDoubleJump && !player.hasDoubleJumped) {
-                    player.velocityY = 330; // Balanced double jump
+                    player.velocityY = 310; // Slightly lower double jump
                     player.hasDoubleJumped = true;
                     // Restart flip on double jump
                     playerAirTime = 0.0f;
@@ -1878,7 +2366,18 @@ void keyboard(unsigned char key, int x, int y) {
 }
 
 void keyboardUp(unsigned char key, int x, int y) {
-    // Handle key releases if needed
+    if (gameState != PLAYING) return;
+
+    switch (key) {
+        case 'a':
+        case 'A':
+            leftPressed = false;
+            break;
+        case 'd':
+        case 'D':
+            rightPressed = false;
+            break;
+    }
 }
 
 void specialKey(int key, int x, int y) {
@@ -1900,23 +2399,32 @@ void specialKey(int key, int x, int y) {
                 currentCharacterSelection = (CharacterSelection)((currentCharacterSelection + 1) % 4);
                 break;
         }
-    } else if (gameState == PLAYING) {
+    } else if (gameState == GAME_OVER || gameState == GAME_WIN) {
+        switch (key) {
+            case GLUT_KEY_UP:
+                currentWinLoseButton = (WinLoseButton)((currentWinLoseButton - 1 + 2) % 2);
+                break;
+            case GLUT_KEY_DOWN:
+                currentWinLoseButton = (WinLoseButton)((currentWinLoseButton + 1) % 2);
+                break;
+        }
+    } else if (gameState == PLAYING && !playerBeingSucked) {
         switch (key) {
             case GLUT_KEY_LEFT:
-                player.velocityX = -250; // Faster movement
+                leftPressed = true;
                 break;
             case GLUT_KEY_RIGHT:
-                player.velocityX = 250; // Faster movement
+                rightPressed = true;
                 break;
             case GLUT_KEY_UP:
                 if (player.onGround) {
-                    player.velocityY = 430; // Balanced jump
+                    player.velocityY = 400; // Slightly lower jump
                     player.onGround = false;
                     // Start flip
                     playerAirTime = 0.0f;
                     playerFlipAngle = 0.0f;
                 } else if (player.canDoubleJump && !player.hasDoubleJumped) {
-                    player.velocityY = 330; // Balanced double jump
+                    player.velocityY = 310; // Slightly lower double jump
                     player.hasDoubleJumped = true;
                     // Restart flip on double jump
                     playerAirTime = 0.0f;
@@ -1929,11 +2437,13 @@ void specialKey(int key, int x, int y) {
 
 void specialKeyUp(int key, int x, int y) {
     if (gameState != PLAYING) return;
-    
+
     switch (key) {
         case GLUT_KEY_LEFT:
+            leftPressed = false;
+            break;
         case GLUT_KEY_RIGHT:
-            player.velocityX = 0;
+            rightPressed = false;
             break;
     }
 }
@@ -1963,6 +2473,12 @@ void initBackgroundParticles() {
     }
 }
 
+// Initialize falling characters for win screen
+void initFallingCharacters() {
+    fallingCharacters.clear();
+    characterSpawnTimer = 0.0f;
+}
+
 // Draw epic animated parallax background
 void drawLayeredBackground() {
     // Initialize particles if empty
@@ -1970,135 +2486,243 @@ void drawLayeredBackground() {
         initBackgroundParticles();
     }
     
-    // Dynamic gradient sky with color transition
-    float colorCycle = sin(bgAnimTime * 0.3f) * 0.5f + 0.5f;
+    // Vice City style sunset gradient with color cycling
+    float sunsetCycle = sin(bgAnimTime * 0.2f) * 0.3f + 0.7f; // Slower, more subtle cycling
     
-    // Draw gradient background from top to bottom
+    // Vintage sunset gradient - top to bottom
     glBegin(GL_QUADS);
-    // Top colors - shifting between purple-blue and orange-pink
-    glColor3f(0.1f + colorCycle * 0.3f, 0.05f + colorCycle * 0.2f, 0.3f + colorCycle * 0.4f);
+    // Sky top - deep purple/magenta
+    glColor3f(0.3f * sunsetCycle, 0.1f * sunsetCycle, 0.5f * sunsetCycle);
     glVertex2f(0, HEIGHT);
     glVertex2f(WIDTH, HEIGHT);
     
-    // Middle colors
-    glColor3f(0.2f + colorCycle * 0.4f, 0.15f + colorCycle * 0.3f, 0.4f);
-    glVertex2f(WIDTH, HEIGHT / 2);
-    glVertex2f(0, HEIGHT / 2);
+    // Upper middle - pink/orange blend
+    glColor3f(0.8f * sunsetCycle, 0.3f * sunsetCycle, 0.6f * sunsetCycle);
+    glVertex2f(WIDTH, HEIGHT * 0.75f);
+    glVertex2f(0, HEIGHT * 0.75f);
     glEnd();
     
     glBegin(GL_QUADS);
-    // Middle to bottom transition
-    glColor3f(0.2f + colorCycle * 0.4f, 0.15f + colorCycle * 0.3f, 0.4f);
-    glVertex2f(0, HEIGHT / 2);
-    glVertex2f(WIDTH, HEIGHT / 2);
+    // Mid horizon - bright orange/yellow
+    glColor3f(0.8f * sunsetCycle, 0.3f * sunsetCycle, 0.6f * sunsetCycle);
+    glVertex2f(0, HEIGHT * 0.75f);
+    glVertex2f(WIDTH, HEIGHT * 0.75f);
     
-    // Bottom colors - darker
-    glColor3f(0.15f, 0.1f, 0.25f);
+    glColor3f(1.0f * sunsetCycle, 0.5f * sunsetCycle, 0.2f * sunsetCycle);
+    glVertex2f(WIDTH, HEIGHT * 0.5f);
+    glVertex2f(0, HEIGHT * 0.5f);
+    glEnd();
+    
+    glBegin(GL_QUADS);
+    // Lower horizon - deep orange to dark
+    glColor3f(1.0f * sunsetCycle, 0.5f * sunsetCycle, 0.2f * sunsetCycle);
+    glVertex2f(0, HEIGHT * 0.5f);
+    glVertex2f(WIDTH, HEIGHT * 0.5f);
+    
+    glColor3f(0.4f * sunsetCycle, 0.2f * sunsetCycle, 0.4f * sunsetCycle);
+    glVertex2f(WIDTH, HEIGHT * 0.25f);
+    glVertex2f(0, HEIGHT * 0.25f);
+    glEnd();
+    
+    glBegin(GL_QUADS);
+    // Bottom - dark purple/black
+    glColor3f(0.4f * sunsetCycle, 0.2f * sunsetCycle, 0.4f * sunsetCycle);
+    glVertex2f(0, HEIGHT * 0.25f);
+    glVertex2f(WIDTH, HEIGHT * 0.25f);
+    
+    glColor3f(0.1f, 0.05f, 0.15f);
     glVertex2f(WIDTH, 0);
     glVertex2f(0, 0);
     glEnd();
     
-    // Back layer - distant floating clouds (slowest)
-    float backCloudOffset = fmod(bgAnimTime * 8.0f, WIDTH + 200);
-    glColor4f(0.2f, 0.15f, 0.35f, 0.3f); // Semi-transparent for blur effect
+    // Distant skyscrapers layer (slowest parallax)
+    float backBuildingOffset = fmod(bgAnimTime * 5.0f, WIDTH + 400);
+    glColor4f(0.1f, 0.05f, 0.2f, 0.6f); // Dark silhouette
     
-    for (int i = 0; i < 3; i++) {
-        float cloudX = backCloudOffset + i * 300 - 200;
-        if (cloudX > WIDTH) cloudX -= WIDTH + 400;
-        float cloudY = HEIGHT * 0.7f + sin(bgAnimTime + i) * 20;
+    // Draw distant skyscraper silhouettes
+    for (int i = 0; i < 8; i++) {
+        float buildingX = backBuildingOffset + i * 80 - 200;
+        if (buildingX > WIDTH) buildingX -= WIDTH + 640;
         
-        // Draw cloud as series of overlapping circles
-        for (int j = 0; j < 4; j++) {
-            float offsetX = j * 25 - 37.5f;
-            float radius = 30 + j * 5;
-            
-            glBegin(GL_POLYGON);
-            for (int k = 0; k < 20; k++) {
-                float angle = 2.0f * M_PI * k / 20;
-                glVertex2f(cloudX + offsetX + radius * cos(angle), 
-                          cloudY + radius * sin(angle));
+        float buildingHeight = 100 + (i * 23) % 80; // Varied heights
+        float buildingWidth = 25 + (i * 7) % 15;
+        
+        // Main building rectangle
+        glBegin(GL_QUADS);
+        glVertex2f(buildingX, HEIGHT * 0.35f);
+        glVertex2f(buildingX + buildingWidth, HEIGHT * 0.35f);
+        glVertex2f(buildingX + buildingWidth, HEIGHT * 0.35f + buildingHeight);
+        glVertex2f(buildingX, HEIGHT * 0.35f + buildingHeight);
+        glEnd();
+        
+        // Window lights (some buildings have lights on)
+        if (i % 2 == 0) {
+            glColor4f(1.0f, 0.9f, 0.6f, 0.8f);
+            for (int w = 0; w < 3; w++) {
+                for (int h = 0; h < (int)(buildingHeight / 15); h++) {
+                    if ((w + h + i) % 3 == 0) { // Random pattern
+                        float winX = buildingX + 3 + w * 7;
+                        float winY = HEIGHT * 0.35f + 5 + h * 15;
+                        glBegin(GL_QUADS);
+                        glVertex2f(winX, winY);
+                        glVertex2f(winX + 4, winY);
+                        glVertex2f(winX + 4, winY + 8);
+                        glVertex2f(winX, winY + 8);
+                        glEnd();
+                    }
+                }
             }
-            glEnd();
+            glColor4f(0.1f, 0.05f, 0.2f, 0.6f); // Reset color
         }
     }
     
-    // Middle layer - medium clouds (medium speed)
-    float midCloudOffset = fmod(bgAnimTime * 15.0f, WIDTH + 200);
-    glColor4f(0.25f, 0.2f, 0.4f, 0.4f);
+    // Middle skyscrapers layer (medium parallax)
+    float midBuildingOffset = fmod(bgAnimTime * 10.0f, WIDTH + 300);
+    glColor4f(0.15f, 0.08f, 0.25f, 0.7f);
+    
+    for (int i = 0; i < 6; i++) {
+        float buildingX = midBuildingOffset + i * 120 - 200;
+        if (buildingX > WIDTH) buildingX -= WIDTH + 720;
+        
+        float buildingHeight = 120 + (i * 31) % 100;
+        float buildingWidth = 35 + (i * 11) % 20;
+        
+        // Main building
+        glBegin(GL_QUADS);
+        glVertex2f(buildingX, HEIGHT * 0.3f);
+        glVertex2f(buildingX + buildingWidth, HEIGHT * 0.3f);
+        glVertex2f(buildingX + buildingWidth, HEIGHT * 0.3f + buildingHeight);
+        glVertex2f(buildingX, HEIGHT * 0.3f + buildingHeight);
+        glEnd();
+        
+        // Antenna/spires on some buildings
+        if (i % 3 == 1) {
+            glBegin(GL_LINES);
+            glVertex2f(buildingX + buildingWidth/2, HEIGHT * 0.3f + buildingHeight);
+            glVertex2f(buildingX + buildingWidth/2, HEIGHT * 0.3f + buildingHeight + 20);
+            glEnd();
+        }
+        
+        // More detailed windows
+        glColor4f(1.0f, 0.8f, 0.4f, 0.9f);
+        for (int w = 0; w < (int)(buildingWidth / 8); w++) {
+            for (int h = 0; h < (int)(buildingHeight / 12); h++) {
+                if ((w + h + i * 2) % 4 != 0) {
+                    float winX = buildingX + 2 + w * 8;
+                    float winY = HEIGHT * 0.3f + 3 + h * 12;
+                    glBegin(GL_QUADS);
+                    glVertex2f(winX, winY);
+                    glVertex2f(winX + 5, winY);
+                    glVertex2f(winX + 5, winY + 6);
+                    glVertex2f(winX, winY + 6);
+                    glEnd();
+                }
+            }
+        }
+        glColor4f(0.15f, 0.08f, 0.25f, 0.7f);
+    }
+    
+    // Foreground skyscrapers (fastest parallax)
+    float frontBuildingOffset = fmod(bgAnimTime * 20.0f, WIDTH + 250);
+    glColor4f(0.08f, 0.04f, 0.15f, 0.8f);
     
     for (int i = 0; i < 4; i++) {
-        float cloudX = midCloudOffset + i * 250 - 200;
-        if (cloudX > WIDTH) cloudX -= WIDTH + 400;
-        float cloudY = HEIGHT * 0.5f + sin(bgAnimTime * 1.5f + i) * 15;
+        float buildingX = frontBuildingOffset + i * 200 - 200;
+        if (buildingX > WIDTH) buildingX -= WIDTH + 800;
         
-        for (int j = 0; j < 3; j++) {
-            float offsetX = j * 20 - 30;
-            float radius = 25 + j * 4;
-            
-            glBegin(GL_POLYGON);
-            for (int k = 0; k < 20; k++) {
-                float angle = 2.0f * M_PI * k / 20;
-                glVertex2f(cloudX + offsetX + radius * cos(angle), 
-                          cloudY + radius * sin(angle));
-            }
+        float buildingHeight = 150 + (i * 43) % 120;
+        float buildingWidth = 50 + (i * 13) % 30;
+        
+        // Main building silhouette
+        glBegin(GL_QUADS);
+        glVertex2f(buildingX, HEIGHT * 0.25f);
+        glVertex2f(buildingX + buildingWidth, HEIGHT * 0.25f);
+        glVertex2f(buildingX + buildingWidth, HEIGHT * 0.25f + buildingHeight);
+        glVertex2f(buildingX, HEIGHT * 0.25f + buildingHeight);
+        glEnd();
+        
+        // Building details - stepped tops
+        if (i % 2 == 0) {
+            glBegin(GL_QUADS);
+            glVertex2f(buildingX + 10, HEIGHT * 0.25f + buildingHeight);
+            glVertex2f(buildingX + buildingWidth - 10, HEIGHT * 0.25f + buildingHeight);
+            glVertex2f(buildingX + buildingWidth - 10, HEIGHT * 0.25f + buildingHeight + 15);
+            glVertex2f(buildingX + 10, HEIGHT * 0.25f + buildingHeight + 15);
             glEnd();
         }
-    }
-    
-    // Front layer - near clouds (fastest)
-    float frontCloudOffset = fmod(bgAnimTime * 25.0f, WIDTH + 200);
-    glColor4f(0.3f, 0.25f, 0.45f, 0.5f);
-    
-    for (int i = 0; i < 5; i++) {
-        float cloudX = frontCloudOffset + i * 200 - 200;
-        if (cloudX > WIDTH) cloudX -= WIDTH + 400;
-        float cloudY = HEIGHT * 0.3f + sin(bgAnimTime * 2.0f + i) * 10;
         
-        for (int j = 0; j < 3; j++) {
-            float offsetX = j * 18 - 27;
-            float radius = 20 + j * 3;
-            
-            glBegin(GL_POLYGON);
-            for (int k = 0; k < 16; k++) {
-                float angle = 2.0f * M_PI * k / 16;
-                glVertex2f(cloudX + offsetX + radius * cos(angle), 
-                          cloudY + radius * sin(angle));
+        // Bright windows creating city atmosphere
+        glColor4f(1.0f, 0.9f, 0.7f, 1.0f);
+        for (int w = 0; w < (int)(buildingWidth / 10); w++) {
+            for (int h = 0; h < (int)(buildingHeight / 15); h++) {
+                if ((w * 3 + h + i) % 5 != 0) {
+                    float winX = buildingX + 3 + w * 10;
+                    float winY = HEIGHT * 0.25f + 5 + h * 15;
+                    glBegin(GL_QUADS);
+                    glVertex2f(winX, winY);
+                    glVertex2f(winX + 6, winY);
+                    glVertex2f(winX + 6, winY + 8);
+                    glVertex2f(winX, winY + 8);
+                    glEnd();
+                }
             }
-            glEnd();
         }
+        glColor4f(0.08f, 0.04f, 0.15f, 0.8f);
     }
     
-    // Floating particles/stars for atmosphere
+    // Atmospheric particles (modified for Vice City vibe)
     for (auto& particle : bgParticles) {
-        // Update particle position
-        particle.y += particle.speed * 0.016f; // Assuming ~60fps
-        if (particle.y > HEIGHT + 10) {
-            particle.y = -10;
+        // Update particle position with slower drift
+        particle.y += particle.speed * 0.008f; // Slower floating for atmospheric effect
+        if (particle.y > HEIGHT + 20) {
+            particle.y = -20;
             particle.x = rand() % WIDTH;
         }
         
-        // Draw particle with glow effect
-        float pulse = sin(bgAnimTime * 2.0f + particle.x) * 0.3f + 0.7f;
-        glColor4f(1.0f, 0.9f, 0.6f, particle.alpha * pulse);
+        // Different particles: some are city lights, others are atmospheric dust
+        float pulse = sin(bgAnimTime * 1.5f + particle.x * 0.01f) * 0.4f + 0.6f;
         
-        // Draw as a small glowing circle
+        if ((int)particle.x % 3 == 0) {
+            // City light reflections - pink/magenta tint
+            glColor4f(1.0f * pulse, 0.4f * pulse, 0.8f * pulse, particle.alpha * 0.6f);
+        } else {
+            // Warm atmospheric particles - orange/yellow
+            glColor4f(1.0f * pulse, 0.8f * pulse, 0.3f * pulse, particle.alpha * 0.4f);
+        }
+        
+        // Draw as small glowing points
         glBegin(GL_POLYGON);
-        for (int i = 0; i < 8; i++) {
-            float angle = 2.0f * M_PI * i / 8;
+        for (int i = 0; i < 6; i++) {
+            float angle = 2.0f * M_PI * i / 6;
             glVertex2f(particle.x + particle.size * cos(angle), 
                       particle.y + particle.size * sin(angle));
         }
         glEnd();
         
-        // Draw outer glow
-        glColor4f(1.0f, 0.9f, 0.6f, particle.alpha * pulse * 0.3f);
+        // Add subtle glow
+        glColor4f(1.0f, 0.6f, 0.4f, particle.alpha * pulse * 0.2f);
         glBegin(GL_POLYGON);
-        for (int i = 0; i < 8; i++) {
-            float angle = 2.0f * M_PI * i / 8;
-            glVertex2f(particle.x + (particle.size + 2) * cos(angle), 
-                      particle.y + (particle.size + 2) * sin(angle));
+        for (int i = 0; i < 6; i++) {
+            float angle = 2.0f * M_PI * i / 6;
+            glVertex2f(particle.x + (particle.size + 1) * cos(angle), 
+                      particle.y + (particle.size + 1) * sin(angle));
         }
         glEnd();
+    }
+    
+    // Add subtle grid lines in the distance for retro-futuristic effect
+    glColor4f(0.3f * sunsetCycle, 0.1f * sunsetCycle, 0.4f * sunsetCycle, 0.15f);
+    float gridOffset = fmod(bgAnimTime * 30.0f, 50.0f);
+    
+    // Horizontal grid lines
+    for (int i = -2; i < HEIGHT / 25; i++) {
+        float lineY = i * 25 + gridOffset;
+        if (lineY > HEIGHT * 0.5f) {
+            glBegin(GL_LINES);
+            glVertex2f(0, lineY);
+            glVertex2f(WIDTH, lineY);
+            glEnd();
+        }
     }
     
     // Semi-transparent overlay for depth blur effect
@@ -2132,11 +2756,8 @@ void drawShadowedTextCentered(float cx, float y, const char* text, float r, floa
 void drawStartMenu() {
     float centerX = WIDTH / 2.0f;
     
-    // Title panel with shadow (responsive width)
-    const char* title = "ICY TOWER ADVENTURE";
-    float titlePanelW = std::min<float>(WIDTH - 40, std::max<float>(400.0f, measureTextWidth(title) + 120.0f));
-    drawBrickPanelWithShadow(centerX - titlePanelW / 2, HEIGHT - 150, titlePanelW, 60, 0.8f, 0.6f, 0.2f);
-    drawShadowedTextCentered(centerX, HEIGHT - 120, title, 1.0f, 1.0f, 1.0f);
+    // Draw pixel art logo instead of text title
+    drawIcyTowerLogo(centerX, HEIGHT - 100);
     
     // Menu options with selection highlighting (responsive widths)
     float menuY = HEIGHT / 2 + 70;
