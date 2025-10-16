@@ -119,6 +119,10 @@ bool doorIsEntering = false;
 float rockSpawnTimer = 0.0f;
 float powerUpSpawnTimer = 0.0f;
 
+// Jump flip state
+float playerAirTime = 0.0f;
+float playerFlipAngle = 0.0f;
+
 // Terrain generation patterns
 enum TerrainPattern {
     MIDDLE_FOCUSED,
@@ -252,6 +256,32 @@ void drawText(float x, float y, const char* text) {
         glutBitmapCharacter(GLUT_BITMAP_HELVETICA_18, *text);
         text++;
     }
+}
+
+// Draw shadowed text with custom color
+void drawShadowedText(float x, float y, const char* text, float r, float g, float b) {
+    glColor3f(0.0f, 0.0f, 0.0f);
+    drawText(x + 1, y - 1, text);
+    glColor3f(r, g, b);
+    drawText(x, y, text);
+}
+
+// Forward declaration for drawBrickPanel used below
+void drawBrickPanel(float x, float y, float width, float height, float r, float g, float b);
+
+// Brick-style UI panel with optional soft shadow
+void drawBrickPanelWithShadow(float x, float y, float width, float height, float r, float g, float b, float shadowAlpha = 0.25f) {
+    // Soft shadow
+    glColor4f(0.0f, 0.0f, 0.0f, shadowAlpha);
+    glBegin(GL_QUADS);
+    glVertex2f(x + 2, y - 2);
+    glVertex2f(x + width + 2, y - 2);
+    glVertex2f(x + width + 2, y + height - 2);
+    glVertex2f(x + 2, y + height - 2);
+    glEnd();
+    
+    // Panel itself
+    drawBrickPanel(x, y, width, height, r, g, b);
 }
 
 // Draw brick-style UI panel
@@ -611,8 +641,15 @@ void drawBusinessman(float x, float y, bool inMenu = false) {
     glPopMatrix();
 }
 
-// Draw player based on selected character
+// Draw player based on selected character (with jump flip rotation)
 void drawPlayer() {
+    float pivotX = player.x + player.width / 2.0f;
+    float pivotY = player.y + player.height / 2.0f;
+    glPushMatrix();
+    glTranslatef(pivotX, pivotY, 0);
+    glRotatef(playerFlipAngle, 0, 0, 1); // Negative angles = clockwise
+    glTranslatef(-pivotX, -pivotY, 0);
+    
     switch (selectedCharacter) {
         case WITCH:
             drawWitch(player.x, player.y, false);
@@ -624,6 +661,7 @@ void drawPlayer() {
             drawBusinessman(player.x, player.y, false);
             break;
     }
+    glPopMatrix();
 }
 
 // Draw platforms (3+ primitives: rectangle base, triangle decoration, line borders)
@@ -1115,16 +1153,82 @@ void drawPowerUps() {
     }
 }
 
+// Simple icons for HUD
+void drawHeartIcon(float x, float y, float s) {
+    glColor3f(0.9f, 0.1f, 0.2f);
+    // Left lobe
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 12; i++) {
+        float a = 2.0f * M_PI * i / 12;
+        glVertex2f(x - 3*s + 3*s * cos(a), y + 2*s + 3*s * sin(a));
+    }
+    glEnd();
+    // Right lobe
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 12; i++) {
+        float a = 2.0f * M_PI * i / 12;
+        glVertex2f(x + 3*s + 3*s * cos(a), y + 2*s + 3*s * sin(a));
+    }
+    glEnd();
+    // Bottom triangle
+    glBegin(GL_TRIANGLES);
+    glVertex2f(x - 6*s, y + 2*s);
+    glVertex2f(x + 6*s, y + 2*s);
+    glVertex2f(x, y - 6*s);
+    glEnd();
+}
+
+void drawCoinIcon(float x, float y, float s) {
+    glColor3f(1.0f, 0.85f, 0.1f);
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 16; i++) {
+        float a = 2.0f * M_PI * i / 16;
+        glVertex2f(x + 5*s * cos(a), y + 5*s * sin(a));
+    }
+    glEnd();
+    glColor3f(1.0f, 1.0f, 0.9f);
+    glBegin(GL_LINES);
+    glVertex2f(x - 3*s, y);
+    glVertex2f(x + 3*s, y);
+    glEnd();
+}
+
+void drawKeyIcon(float x, float y, float s) {
+    glColor3f(1.0f, 0.9f, 0.2f);
+    // Head
+    glBegin(GL_POLYGON);
+    for (int i = 0; i < 12; i++) {
+        float a = 2.0f * M_PI * i / 12;
+        glVertex2f(x - 6*s + 4*s * cos(a), y + 4*s * sin(a));
+    }
+    glEnd();
+    // Shaft
+    glBegin(GL_QUADS);
+    glVertex2f(x - 2*s, y - 1*s);
+    glVertex2f(x + 8*s, y - 1*s);
+    glVertex2f(x + 8*s, y + 1*s);
+    glVertex2f(x - 2*s, y + 1*s);
+    glEnd();
+    // Teeth
+    glBegin(GL_TRIANGLES);
+    glVertex2f(x + 8*s, y - 1*s);
+    glVertex2f(x + 11*s, y - 1*s);
+    glVertex2f(x + 11*s, y + 1*s);
+    glEnd();
+}
+
 // Draw HUD
 void drawHUD() {
-    // Main HUD panel with brick texture
-    drawBrickPanel(5, HEIGHT - 50, WIDTH - 10, 45, 0.4f, 0.4f, 0.6f);
+    // Main HUD panel with brick texture and shadow
+    drawBrickPanelWithShadow(5, HEIGHT - 50, WIDTH - 10, 45, 0.4f, 0.4f, 0.6f);
     
     // Health section with brick panel
-    drawBrickPanel(15, HEIGHT - 35, 200, 20, 0.3f, 0.5f, 0.3f);
+    drawBrickPanelWithShadow(15, HEIGHT - 35, 200, 20, 0.3f, 0.5f, 0.3f);
     
-    glColor3f(1.0f, 1.0f, 1.0f);
-    drawText(20, HEIGHT - 20, "Health:");
+    drawShadowedText(20, HEIGHT - 20, "Health:", 1.0f, 1.0f, 1.0f);
+    
+    // Heart icon
+    drawHeartIcon(65, HEIGHT - 22, 1.0f);
     
     // Health bar (2+ primitives: rectangle background, rectangle health)
     glColor3f(0.2f, 0.2f, 0.2f);
@@ -1150,16 +1254,14 @@ void drawHUD() {
     glEnd();
     
     // Lives text
-    glColor3f(1.0f, 1.0f, 1.0f);
     std::stringstream livesText;
     livesText << playerLives << "/3";
-    drawText(185, HEIGHT - 25, livesText.str().c_str());
+    drawShadowedText(185, HEIGHT - 25, livesText.str().c_str(), 1.0f, 1.0f, 1.0f);
     
     // Lava danger section with brick panel
-    drawBrickPanel(230, HEIGHT - 35, 200, 20, 0.5f, 0.3f, 0.3f);
+    drawBrickPanelWithShadow(230, HEIGHT - 35, 200, 20, 0.5f, 0.3f, 0.3f);
     
-    glColor3f(1.0f, 1.0f, 1.0f);
-    drawText(235, HEIGHT - 20, "Lava Danger:");
+    drawShadowedText(235, HEIGHT - 20, "Lava Danger:", 1.0f, 1.0f, 1.0f);
     
     // Lava danger indicator (2+ primitives: rectangle background, rectangle danger)
     glColor3f(0.2f, 0.2f, 0.2f);
@@ -1181,13 +1283,13 @@ void drawHUD() {
     glEnd();
     
     // Score and stats panel with brick texture
-    drawBrickPanel(WIDTH - 180, HEIGHT - 35, 170, 20, 0.6f, 0.5f, 0.3f);
+    drawBrickPanelWithShadow(WIDTH - 180, HEIGHT - 35, 170, 20, 0.6f, 0.5f, 0.3f);
     
-    // Score display
-    glColor3f(1.0f, 1.0f, 1.0f);
+    // Score display with coin icon
     std::stringstream ss;
     ss << "Score: " << score;
-    drawText(WIDTH - 175, HEIGHT - 20, ss.str().c_str());
+    drawShadowedText(WIDTH - 175, HEIGHT - 20, ss.str().c_str(), 1.0f, 1.0f, 1.0f);
+    drawCoinIcon(WIDTH - 40, HEIGHT - 23, 1.0f);
     
     // Collectables counter
     int collected = 0;
@@ -1196,33 +1298,31 @@ void drawHUD() {
     }
     std::stringstream collectText;
     collectText << "Coins: " << collected << "/" << collectables.size();
-    drawText(WIDTH - 100, HEIGHT - 20, collectText.str().c_str());
+    drawShadowedText(WIDTH - 100, HEIGHT - 20, collectText.str().c_str(), 1.0f, 1.0f, 1.0f);
     
     // Key status with brick panel
     if (keySpawned || keyCollected || collected > 0) {
-        drawBrickPanel(WIDTH / 2 - 100, HEIGHT - 80, 200, 25, 0.5f, 0.5f, 0.2f);
+        drawBrickPanelWithShadow(WIDTH / 2 - 100, HEIGHT - 80, 200, 25, 0.5f, 0.5f, 0.2f);
         
         if (keySpawned && !keyCollected) {
-            glColor3f(1.0f, 1.0f, 0.0f);
-            drawText(WIDTH / 2 - 60, HEIGHT - 65, "KEY AVAILABLE!");
+            drawShadowedText(WIDTH / 2 - 60, HEIGHT - 65, "KEY AVAILABLE!", 1.0f, 1.0f, 0.0f);
+            drawKeyIcon(WIDTH / 2 + 60, HEIGHT - 65, 0.8f);
         } else if (keyCollected) {
-            glColor3f(0.0f, 1.0f, 0.0f);
-            drawText(WIDTH / 2 - 50, HEIGHT - 65, "KEY FOUND!");
+            drawShadowedText(WIDTH / 2 - 50, HEIGHT - 65, "KEY FOUND!", 0.0f, 1.0f, 0.0f);
+            drawKeyIcon(WIDTH / 2 + 60, HEIGHT - 65, 0.8f);
         } else {
-            glColor3f(0.8f, 0.8f, 0.8f);
             std::stringstream keyText;
             keyText << "Collect " << (5 - collected) << " more coins for key";
-            if (collected < 5) drawText(WIDTH / 2 - 80, HEIGHT - 65, keyText.str().c_str());
+            if (collected < 5) drawShadowedText(WIDTH / 2 - 80, HEIGHT - 65, keyText.str().c_str(), 0.8f, 0.8f, 0.8f);
         }
     }
     
     // Power-up indicator with brick panel
     if (player.powerUpType > 0) {
-        drawBrickPanel(WIDTH / 2 - 80, HEIGHT - 110, 160, 35, 0.2f, 0.4f, 0.6f);
+        drawBrickPanelWithShadow(WIDTH / 2 - 80, HEIGHT - 110, 160, 35, 0.2f, 0.4f, 0.6f);
         
-        glColor3f(0.0f, 1.0f, 0.0f);
         std::string powerUpText = (player.powerUpType == 1) ? "SHIELD ACTIVE" : "DOUBLE JUMP ACTIVE";
-        drawText(WIDTH / 2 - 50, HEIGHT - 90, powerUpText.c_str());
+        drawShadowedText(WIDTH / 2 - 50, HEIGHT - 90, powerUpText.c_str(), 0.0f, 1.0f, 0.0f);
         
         // Timer bar for power-up
         float timerRatio = player.powerUpTimer / 12.0f;
@@ -1244,9 +1344,8 @@ void drawHUD() {
     }
     
     // Controls reminder with brick panel
-    drawBrickPanel(5, 5, WIDTH - 10, 25, 0.35f, 0.35f, 0.45f);
-    glColor3f(0.9f, 0.9f, 0.9f);
-    drawText(15, 20, "Controls: WASD/Arrows to move, Space/W/Up to jump");
+    drawBrickPanelWithShadow(5, 5, WIDTH - 10, 25, 0.35f, 0.35f, 0.45f);
+    drawShadowedText(15, 20, "Controls: WASD/Arrows to move, Space/W/Up to jump", 0.9f, 0.9f, 0.9f);
 }
 
 // Draw game over screen
@@ -1399,6 +1498,17 @@ void update(float deltaTime) {
                 player.hasDoubleJumped = false;
             }
         }
+    }
+
+    // Update jump flip timing
+    if (player.onGround) {
+        playerAirTime = 0.0f;
+        playerFlipAngle = 0.0f;
+    } else {
+        playerAirTime += deltaTime;
+        float flipDuration = 0.7f; // seconds per full flip
+        float progress = std::min(1.0f, playerAirTime / flipDuration);
+        playerFlipAngle = -360.0f * progress; // clockwise
     }
     
     // Lava collision
@@ -1630,9 +1740,15 @@ void keyboard(unsigned char key, int x, int y) {
                 if (player.onGround) {
                     player.velocityY = 430; // Balanced jump
                     player.onGround = false;
+                    // Start flip
+                    playerAirTime = 0.0f;
+                    playerFlipAngle = 0.0f;
                 } else if (player.canDoubleJump && !player.hasDoubleJumped) {
                     player.velocityY = 330; // Balanced double jump
                     player.hasDoubleJumped = true;
+                    // Restart flip on double jump
+                    playerAirTime = 0.0f;
+                    playerFlipAngle = 0.0f;
                 }
             }
             break;
@@ -1674,9 +1790,15 @@ void specialKey(int key, int x, int y) {
                 if (player.onGround) {
                     player.velocityY = 430; // Balanced jump
                     player.onGround = false;
+                    // Start flip
+                    playerAirTime = 0.0f;
+                    playerFlipAngle = 0.0f;
                 } else if (player.canDoubleJump && !player.hasDoubleJumped) {
                     player.velocityY = 330; // Balanced double jump
                     player.hasDoubleJumped = true;
+                    // Restart flip on double jump
+                    playerAirTime = 0.0f;
+                    playerFlipAngle = 0.0f;
                 }
                 break;
         }
