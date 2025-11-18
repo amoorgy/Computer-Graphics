@@ -13,9 +13,12 @@
 #include <sstream>
 #include <algorithm>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 // Window dimensions
 const int WIDTH = 800;
-const int HEIGHT = 600;
+const int HEIGHT = 900; // Increased height for more vertical space
 
 // Game states
 enum GameState {
@@ -60,6 +63,10 @@ CharacterType selectedCharacter = WITCH;
 float menuAnimTime = 0.0f;
 float logoGlowTime = 0.0f;
 
+// Texture variables
+GLuint logoTexture = 0;
+int logoWidth = 0, logoHeight = 0;
+
 // Win/Lose screen button states
 enum WinLoseButton {
     BUTTON_RESTART,
@@ -69,15 +76,15 @@ WinLoseButton currentWinLoseButton = BUTTON_RESTART;
 
 // Player properties
 struct Player {
-    float x, y;
-    float velocityX, velocityY;
-    float width, height;
-    bool onGround;
-    bool hasKey;
-    int powerUpType; // 0 = none, 1 = shield, 2 = double jump
-    float powerUpTimer;
-    bool canDoubleJump;
-    bool hasDoubleJumped;
+    float x, y;                  // Position on screen
+    float velocityX, velocityY;  // Speed (horizontal & vertical)
+    float width, height;         // Size (collision box)
+    bool onGround;              // Touching a platform?
+    bool hasKey;                // Collected the purple key?
+    int powerUpType;            // 0=none, 1=shield, 2=double jump
+    float powerUpTimer;         // Seconds left of power-up
+    bool canDoubleJump;         // Can press jump again in air?
+    bool hasDoubleJumped;       // Already used double jump?
 } player;
 
 // Movement input state for smooth acceleration
@@ -165,7 +172,16 @@ enum TerrainPattern {
 
 // Initialize game
 void initGame() {
-    srand(time(NULL));
+    // Don't reseed srand - keep randomization between games
+    static bool seeded = false;
+    if (!seeded) {
+        srand(time(NULL));
+        seeded = true;
+    }
+    
+    // Reset movement keys
+    leftPressed = false;
+    rightPressed = false;
     
     // Initialize player with better stats
     player.x = WIDTH / 2.0f;
@@ -193,7 +209,7 @@ void initGame() {
     // Level platforms with challenging, varied generation
     float platformY = 135; // Start slightly higher
     const int baseWidths[4] = {50, 100, 150, 200};
-    for (int i = 0; i < 18; i++) { // Slightly more platforms
+    for (int i = 0; i < 25; i++) { // More platforms for increased height
         // Pick one of the 4 main lengths with variation
         int w = baseWidths[rand() % 4];
         int jitter = (rand() % 21) - 10; // -10..+10 for more variation
@@ -239,10 +255,15 @@ void initGame() {
         platformY += 45 + rand() % 30; // 45..74
     }
     
+    // Add final platform near the door at the top
+    float doorPlatformY = HEIGHT - 200; // Platform just below door
+    float doorPlatformX = WIDTH / 2 - 60; // Centered under door
+    platforms.push_back({doorPlatformX, doorPlatformY, 120, 15, true});
+    
     // Create collectables (at least 5) - Place them near platforms
     collectables.clear();
-    for (int i = 0; i < 8; i++) {
-        if (i < platforms.size() - 1) {
+    for (int i = 0; i < 10; i++) { // More collectables for bigger game
+        if (i < platforms.size() - 2) { // Avoid last platform (door platform)
             // Place collectables near platforms for easier collection
             float platX = platforms[i + 1].x + platforms[i + 1].width / 2;
             float platY = platforms[i + 1].y + platforms[i + 1].height + 20;
@@ -250,7 +271,7 @@ void initGame() {
             float y = platY + (rand() % 30);
             collectables.push_back({x, y, false, 0.0f, i});
         } else {
-            // Backup placement for extra collectables
+            // Backup placement for extra collectables in middle area
             float x = 100 + rand() % (WIDTH - 200);
             float y = 250 + i * 60 + rand() % 30;
             collectables.push_back({x, y, false, 0.0f, i});
@@ -304,8 +325,63 @@ void drawShadowedTextCentered(float cx, float y, const char* text, float r, floa
 void drawLayeredBackground();
 void initFallingCharacters();
 
-// Draw pixel art Icy Tower logo with glow animation
+// Load texture from image file
+GLuint loadTexture(const char* filename, int* width, int* height) {
+    int channels;
+    unsigned char* data = stbi_load(filename, width, height, &channels, 4);
+    if (!data) {
+        std::cerr << "Failed to load texture: " << filename << std::endl;
+        return 0;
+    }
+    
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+    
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, *width, *height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    
+    stbi_image_free(data);
+    return textureID;
+}
+
+// Play sound using macOS afplay command
+void playSound(const char* filename) {
+    std::string command = std::string("afplay ") + filename + " &";
+    system(command.c_str());
+}
+
+// Draw PNG logo texture
 void drawIcyTowerLogo(float centerX, float centerY) {
+    if (logoTexture == 0) return;
+    
+    // Scale logo to fit nicely in menu
+    float displayWidth = 400.0f;
+    float displayHeight = (float)logoHeight * (displayWidth / (float)logoWidth);
+    
+    float x = centerX - displayWidth / 2.0f;
+    float y = centerY - displayHeight / 2.0f;
+    
+    glEnable(GL_TEXTURE_2D);
+    glBindTexture(GL_TEXTURE_2D, logoTexture);
+    glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
+    
+    glBegin(GL_QUADS);
+    glTexCoord2f(0.0f, 1.0f); glVertex2f(x, y);
+    glTexCoord2f(1.0f, 1.0f); glVertex2f(x + displayWidth, y);
+    glTexCoord2f(1.0f, 0.0f); glVertex2f(x + displayWidth, y + displayHeight);
+    glTexCoord2f(0.0f, 0.0f); glVertex2f(x, y + displayHeight);
+    glEnd();
+    
+    glDisable(GL_TEXTURE_2D);
+}
+
+// Old pixel art version (keeping as backup)
+void drawIcyTowerLogoPixelArt(float centerX, float centerY) {
     float pixelSize = 8.0f; // Bigger pixels
     logoGlowTime += 0.016f; // Increment glow timer
     
@@ -632,6 +708,7 @@ void drawWitch(float x, float y, bool inMenu = false) {
     glVertex2f(25, 25); // Bottom right
     glVertex2f(20, 5);  // Top right
     glEnd();
+
     
     // Witch hat (triangle)
     glColor3f(0.1f, 0.0f, 0.2f);
@@ -1046,8 +1123,8 @@ void drawCollectables() {
         float overall = 0.8f + 0.4f * t;  // Larger when face-on
         glScalef(overall * xScale, overall, 1.0f);
 
-        // Base coin (ellipse due to X scaling) - PRIMITIVE 1: Polygon
-        glColor3f(1.0f, 0.82f, 0.1f);
+        // Base coin (ellipse due to X scaling) - PRIMITIVE 1: Polygon - Updated to cyan/turquoise
+        glColor3f(0.2f, 0.9f, 0.95f);
         glBegin(GL_POLYGON);
         for (int i = 0; i < 24; i++) {
             float angle = 2.0f * M_PI * i / 24;
@@ -1055,8 +1132,8 @@ void drawCollectables() {
         }
         glEnd();
 
-        // Rim ring - PRIMITIVE 2: Line loop
-        glColor3f(1.0f, 0.9f, 0.3f);
+        // Rim ring - PRIMITIVE 2: Line loop - Lighter cyan
+        glColor3f(0.5f, 1.0f, 1.0f);
         glBegin(GL_LINE_LOOP);
         for (int i = 0; i < 24; i++) {
             float angle = 2.0f * M_PI * i / 24;
@@ -1064,11 +1141,11 @@ void drawCollectables() {
         }
         glEnd();
 
-        // Radial highlight - PRIMITIVE 3: Triangle fan gradient
+        // Radial highlight - PRIMITIVE 3: Triangle fan gradient - Bright cyan to aqua
         glBegin(GL_TRIANGLE_FAN);
-        glColor3f(1.0f, 0.98f, 0.6f); // center bright
+        glColor3f(0.8f, 1.0f, 1.0f); // center bright aqua
         glVertex2f(0.0f, 0.0f); // centered for Y-axis rotation
-        glColor3f(1.0f, 0.85f, 0.2f); // outer gold
+        glColor3f(0.1f, 0.85f, 0.95f); // outer cyan
         for (int i = 0; i <= 24; i++) {
             float angle = 2.0f * M_PI * i / 24;
             glVertex2f(10.0f * cosf(angle), 10.0f * sinf(angle));
@@ -1084,9 +1161,9 @@ void drawCollectables() {
         glVertex2f(-7.0f, 1.0f);
         glEnd();
 
-        // Edge darkening when thin (simulates depth)
+        // Edge darkening when thin (simulates depth) - Darker cyan
         float edgeAlpha = 1.0f - t; // stronger when thinner
-        glColor4f(0.6f, 0.4f, 0.1f, 0.4f * edgeAlpha);
+        glColor4f(0.1f, 0.5f, 0.6f, 0.4f * edgeAlpha);
         glBegin(GL_LINE_LOOP);
         for (int i = 0; i < 24; i++) {
             float angle = 2.0f * M_PI * i / 24;
@@ -1108,8 +1185,8 @@ void drawKey() {
     float scale = 1.0f + 0.1f * sin(keyAnimTime * 4);
     glScalef(scale, scale, 1);
     
-    // Key shaft (rectangle)
-    glColor3f(1.0f, 0.8f, 0.0f);
+    // Key shaft (rectangle) - Updated to silver/purple
+    glColor3f(0.85f, 0.6f, 0.95f);
     glBegin(GL_QUADS);
     glVertex2f(-15, -2);
     glVertex2f(5, -2);
@@ -1117,8 +1194,8 @@ void drawKey() {
     glVertex2f(-15, 2);
     glEnd();
     
-    // Key head (circle)
-    glColor3f(1.0f, 0.9f, 0.2f);
+    // Key head (circle) - Lighter purple
+    glColor3f(0.95f, 0.75f, 1.0f);
     glBegin(GL_POLYGON);
     for (int i = 0; i < 12; i++) {
         float angle = 2.0f * M_PI * i / 12;
@@ -1126,8 +1203,8 @@ void drawKey() {
     }
     glEnd();
     
-    // Key teeth (triangles)
-    glColor3f(1.0f, 0.8f, 0.0f);
+    // Key teeth (triangles) - Medium purple
+    glColor3f(0.85f, 0.6f, 0.95f);
     glBegin(GL_TRIANGLES);
     glVertex2f(5, -2);
     glVertex2f(10, -2);
@@ -1140,8 +1217,8 @@ void drawKey() {
     glVertex2f(8, 0);
     glEnd();
     
-    // Handle decoration (line)
-    glColor3f(0.8f, 0.6f, 0.0f);
+    // Handle decoration (line) - Darker purple
+    glColor3f(0.6f, 0.3f, 0.8f);
     glBegin(GL_LINES);
     glVertex2f(-15, -4);
     glVertex2f(-15, 4);
@@ -1153,7 +1230,7 @@ void drawKey() {
 // Draw epic animated door
 void drawDoor() {
     float doorX = WIDTH / 2 - 40;
-    float doorY = HEIGHT - 120;
+    float doorY = HEIGHT - 150; // Positioned at the very top of the game area
     
     glPushMatrix();
     glTranslatef(doorX, doorY, 0);
@@ -1479,14 +1556,14 @@ void drawHeartIcon(float x, float y, float s) {
 }
 
 void drawCoinIcon(float x, float y, float s) {
-    glColor3f(1.0f, 0.85f, 0.1f);
+    glColor3f(0.2f, 0.9f, 0.95f); // Updated to cyan to match new coin color
     glBegin(GL_POLYGON);
     for (int i = 0; i < 16; i++) {
         float a = 2.0f * M_PI * i / 16;
         glVertex2f(x + 5*s * cos(a), y + 5*s * sin(a));
     }
     glEnd();
-    glColor3f(1.0f, 1.0f, 0.9f);
+    glColor3f(0.8f, 1.0f, 1.0f); // Lighter cyan for highlight
     glBegin(GL_LINES);
     glVertex2f(x - 3*s, y);
     glVertex2f(x + 3*s, y);
@@ -1494,7 +1571,7 @@ void drawCoinIcon(float x, float y, float s) {
 }
 
 void drawKeyIcon(float x, float y, float s) {
-    glColor3f(1.0f, 0.9f, 0.2f);
+    glColor3f(0.95f, 0.75f, 1.0f); // Updated to purple to match new key color
     // Head
     glBegin(GL_POLYGON);
     for (int i = 0; i < 12; i++) {
@@ -1519,133 +1596,113 @@ void drawKeyIcon(float x, float y, float s) {
 
 // Draw HUD
 void drawHUD() {
-    // Main HUD panel with brick texture and shadow
-    drawBrickPanelWithShadow(5, HEIGHT - 50, WIDTH - 10, 45, 0.4f, 0.4f, 0.6f);
+    // Main compact HUD panel at bottom
+    drawBrickPanelWithShadow(5, 5, WIDTH - 10, 60, 0.4f, 0.4f, 0.6f);
     
-    // Health section with brick panel
-    drawBrickPanelWithShadow(15, HEIGHT - 35, 200, 20, 0.3f, 0.5f, 0.3f);
+    // Left side: Health section (compact)
+    drawBrickPanelWithShadow(15, 40, 140, 18, 0.3f, 0.5f, 0.3f);
+    drawShadowedText(20, 53, "HP:", 1.0f, 1.0f, 1.0f);
+    drawHeartIcon(45, 50, 0.7f);
     
-    drawShadowedText(20, HEIGHT - 20, "Health:", 1.0f, 1.0f, 1.0f);
-    
-    // Heart icon
-    drawHeartIcon(65, HEIGHT - 22, 1.0f);
-    
-    // Health bar (2+ primitives: rectangle background, rectangle health)
+    // Health bar (compact)
     glColor3f(0.2f, 0.2f, 0.2f);
     glBegin(GL_QUADS);
-    glVertex2f(75, HEIGHT - 30);
-    glVertex2f(175, HEIGHT - 30);
-    glVertex2f(175, HEIGHT - 15);
-    glVertex2f(75, HEIGHT - 15);
+    glVertex2f(55, 43);
+    glVertex2f(145, 43);
+    glVertex2f(145, 55);
+    glVertex2f(55, 55);
     glEnd();
     
-    // Health bar fill with color coding
     float healthRatio = (float)playerLives / 3.0f;
-    if (healthRatio > 0.6f) glColor3f(0.2f, 0.8f, 0.2f); // Green
-    else if (healthRatio > 0.3f) glColor3f(0.8f, 0.8f, 0.2f); // Yellow
-    else glColor3f(0.8f, 0.2f, 0.2f); // Red
+    if (healthRatio > 0.6f) glColor3f(0.2f, 0.8f, 0.2f);
+    else if (healthRatio > 0.3f) glColor3f(0.8f, 0.8f, 0.2f);
+    else glColor3f(0.8f, 0.2f, 0.2f);
     
-    float healthWidth = 100.0f * healthRatio;
+    float healthWidth = 90.0f * healthRatio;
     glBegin(GL_QUADS);
-    glVertex2f(75, HEIGHT - 30);
-    glVertex2f(75 + healthWidth, HEIGHT - 30);
-    glVertex2f(75 + healthWidth, HEIGHT - 15);
-    glVertex2f(75, HEIGHT - 15);
+    glVertex2f(55, 43);
+    glVertex2f(55 + healthWidth, 43);
+    glVertex2f(55 + healthWidth, 55);
+    glVertex2f(55, 55);
     glEnd();
     
-    // Lives text
-    std::stringstream livesText;
-    livesText << playerLives << "/3";
-    drawShadowedText(185, HEIGHT - 25, livesText.str().c_str(), 1.0f, 1.0f, 1.0f);
+    // Lava danger (compact)
+    drawBrickPanelWithShadow(165, 40, 150, 18, 0.5f, 0.3f, 0.3f);
+    drawShadowedText(170, 53, "Lava:", 1.0f, 1.0f, 1.0f);
     
-    // Lava danger section with brick panel
-    drawBrickPanelWithShadow(230, HEIGHT - 35, 200, 20, 0.5f, 0.3f, 0.3f);
-    
-    drawShadowedText(235, HEIGHT - 20, "Lava Danger:", 1.0f, 1.0f, 1.0f);
-    
-    // Lava danger indicator (2+ primitives: rectangle background, rectangle danger)
     glColor3f(0.2f, 0.2f, 0.2f);
     glBegin(GL_QUADS);
-    glVertex2f(325, HEIGHT - 30);
-    glVertex2f(425, HEIGHT - 30);
-    glVertex2f(425, HEIGHT - 15);
-    glVertex2f(325, HEIGHT - 15);
+    glVertex2f(210, 43);
+    glVertex2f(305, 43);
+    glVertex2f(305, 55);
+    glVertex2f(210, 55);
     glEnd();
     
     float dangerLevel = std::min(1.0f, lavaHeight / (HEIGHT * 0.7f));
     glColor3f(1.0f, 1.0f - dangerLevel, 0.0f);
-    float dangerWidth = 100.0f * dangerLevel;
+    float dangerWidth = 95.0f * dangerLevel;
     glBegin(GL_QUADS);
-    glVertex2f(325, HEIGHT - 30);
-    glVertex2f(325 + dangerWidth, HEIGHT - 30);
-    glVertex2f(325 + dangerWidth, HEIGHT - 15);
-    glVertex2f(325, HEIGHT - 15);
+    glVertex2f(210, 43);
+    glVertex2f(210 + dangerWidth, 43);
+    glVertex2f(210 + dangerWidth, 55);
+    glVertex2f(210, 55);
     glEnd();
     
-    // Score and stats panel with brick texture
-    drawBrickPanelWithShadow(WIDTH - 180, HEIGHT - 35, 170, 20, 0.6f, 0.5f, 0.3f);
-    
-    // Score display with coin icon
-    std::stringstream ss;
-    ss << "Score: " << score;
-    drawShadowedText(WIDTH - 175, HEIGHT - 20, ss.str().c_str(), 1.0f, 1.0f, 1.0f);
-    drawCoinIcon(WIDTH - 40, HEIGHT - 23, 1.0f);
-    
-    // Collectables counter
+    // Center: Coins collected (moved from top)
     int collected = 0;
     for (const auto& c : collectables) {
         if (c.collected) collected++;
     }
-    std::stringstream collectText;
-    collectText << "Coins: " << collected << "/" << collectables.size();
-    drawShadowedText(WIDTH - 100, HEIGHT - 20, collectText.str().c_str(), 1.0f, 1.0f, 1.0f);
     
-    // Key status with brick panel
-    if (keySpawned || keyCollected || collected > 0) {
-        drawBrickPanelWithShadow(WIDTH / 2 - 100, HEIGHT - 80, 200, 25, 0.5f, 0.5f, 0.2f);
-        
-        if (keySpawned && !keyCollected) {
-            drawShadowedText(WIDTH / 2 - 60, HEIGHT - 65, "KEY AVAILABLE!", 1.0f, 1.0f, 0.0f);
-            drawKeyIcon(WIDTH / 2 + 60, HEIGHT - 65, 0.8f);
-        } else if (keyCollected) {
-            drawShadowedText(WIDTH / 2 - 50, HEIGHT - 65, "KEY FOUND!", 0.0f, 1.0f, 0.0f);
-            drawKeyIcon(WIDTH / 2 + 60, HEIGHT - 65, 0.8f);
-        } else {
-            std::stringstream keyText;
-            keyText << "Collect " << (5 - collected) << " more coins for key";
-            if (collected < 5) drawShadowedText(WIDTH / 2 - 80, HEIGHT - 65, keyText.str().c_str(), 0.8f, 0.8f, 0.8f);
-        }
+    drawBrickPanelWithShadow(WIDTH / 2 - 90, 40, 180, 18, 0.5f, 0.5f, 0.2f);
+    if (keyCollected) {
+        drawShadowedText(WIDTH / 2 - 50, 53, "KEY FOUND!", 0.0f, 1.0f, 0.0f);
+        drawKeyIcon(WIDTH / 2 + 40, 50, 0.6f);
+    } else if (keySpawned) {
+        drawShadowedText(WIDTH / 2 - 55, 53, "KEY AVAILABLE!", 1.0f, 1.0f, 0.0f);
+        drawKeyIcon(WIDTH / 2 + 50, 50, 0.6f);
+    } else {
+        std::stringstream keyText;
+        keyText << "Collect " << (5 - collected) << " coins";
+        drawShadowedText(WIDTH / 2 - 60, 53, keyText.str().c_str(), 0.8f, 0.8f, 0.8f);
     }
     
-    // Power-up indicator with brick panel
+    // Right side: Score
+    drawBrickPanelWithShadow(WIDTH - 180, 40, 170, 18, 0.6f, 0.5f, 0.3f);
+    std::stringstream ss;
+    ss << "Score: " << score;
+    drawShadowedText(WIDTH - 175, 53, ss.str().c_str(), 1.0f, 1.0f, 1.0f);
+    drawCoinIcon(WIDTH - 30, 50, 0.7f);
+    
+    // Bottom line: Coins counter
+    std::stringstream collectText;
+    collectText << "Coins: " << collected << "/" << collectables.size();
+    drawShadowedText(15, 20, collectText.str().c_str(), 1.0f, 1.0f, 1.0f);
+    drawCoinIcon(100, 18, 0.6f);
+    
+    // Power-up indicator (bottom right, compact)
     if (player.powerUpType > 0) {
-        drawBrickPanelWithShadow(WIDTH / 2 - 80, HEIGHT - 110, 160, 35, 0.2f, 0.4f, 0.6f);
+        std::string powerUpText = (player.powerUpType == 1) ? "SHIELD" : "DOUBLE JUMP";
+        drawShadowedText(WIDTH - 120, 20, powerUpText.c_str(), 0.0f, 1.0f, 0.0f);
         
-        std::string powerUpText = (player.powerUpType == 1) ? "SHIELD ACTIVE" : "DOUBLE JUMP ACTIVE";
-        drawShadowedText(WIDTH / 2 - 50, HEIGHT - 90, powerUpText.c_str(), 0.0f, 1.0f, 0.0f);
-        
-        // Timer bar for power-up
+        // Mini timer bar
         float timerRatio = player.powerUpTimer / 12.0f;
         glColor3f(0.2f, 0.2f, 0.2f);
         glBegin(GL_QUADS);
-        glVertex2f(WIDTH / 2 - 70, HEIGHT - 85);
-        glVertex2f(WIDTH / 2 + 70, HEIGHT - 85);
-        glVertex2f(WIDTH / 2 + 70, HEIGHT - 80);
-        glVertex2f(WIDTH / 2 - 70, HEIGHT - 80);
+        glVertex2f(WIDTH - 120, 10);
+        glVertex2f(WIDTH - 20, 10);
+        glVertex2f(WIDTH - 20, 13);
+        glVertex2f(WIDTH - 120, 13);
         glEnd();
         
         glColor3f(0.0f, 0.8f, 0.8f);
         glBegin(GL_QUADS);
-        glVertex2f(WIDTH / 2 - 70, HEIGHT - 85);
-        glVertex2f(WIDTH / 2 - 70 + 140 * timerRatio, HEIGHT - 85);
-        glVertex2f(WIDTH / 2 - 70 + 140 * timerRatio, HEIGHT - 80);
-        glVertex2f(WIDTH / 2 - 70, HEIGHT - 80);
+        glVertex2f(WIDTH - 120, 10);
+        glVertex2f(WIDTH - 120 + 100 * timerRatio, 10);
+        glVertex2f(WIDTH - 120 + 100 * timerRatio, 13);
+        glVertex2f(WIDTH - 120, 13);
         glEnd();
     }
-    
-    // Controls reminder with brick panel
-    drawBrickPanelWithShadow(5, 5, WIDTH - 10, 25, 0.35f, 0.35f, 0.45f);
-    drawShadowedText(15, 20, "Controls: WASD/Arrows to move, Space/W/Up to jump", 0.9f, 0.9f, 0.9f);
 }
 
 // Draw game over screen (stylized)
@@ -2058,6 +2115,7 @@ void update(float deltaTime) {
     // Lava collision
     if (player.y <= lavaHeight) {
         gameState = GAME_OVER;
+        playSound("game-over-417465.mp3");
         return;
     }
     
@@ -2090,6 +2148,7 @@ void update(float deltaTime) {
                 playerLives--;
                 if (playerLives <= 0) {
                     gameState = GAME_OVER;
+                    playSound("game-over-417465.mp3");
                     return;
                 }
             }
@@ -2130,8 +2189,20 @@ void update(float deltaTime) {
         
         if (collectedCount >= 5) {
             keySpawned = true;
-            keyX = 100 + rand() % (WIDTH - 200);
-            keyY = 300 + rand() % 200;
+            // Spawn key near a platform in the upper middle section
+            int platformIndex = platforms.size() / 2 + 2; // Middle-upper platform
+            if (platformIndex < platforms.size()) {
+                const Platform& plat = platforms[platformIndex];
+                keyX = plat.x + plat.width / 2 + (rand() % 60 - 30); // Near platform center
+                keyY = plat.y + plat.height + 30 + (rand() % 40); // Above platform
+            } else {
+                // Fallback to player vicinity
+                keyX = player.x + (rand() % 100 - 50);
+                keyY = player.y + 100 + (rand() % 100);
+            }
+            // Clamp to screen bounds
+            keyX = std::max(50.0f, std::min((float)WIDTH - 50.0f, keyX));
+            keyY = std::max(200.0f, std::min((float)HEIGHT - 200.0f, keyY));
         }
     }
     
@@ -2194,6 +2265,7 @@ void update(float deltaTime) {
             player.powerUpTimer = 12.0f; // Last longer when activated
             if (powerUp.type == 2) {
                 player.canDoubleJump = true;
+                playSound("game-bonus-02-294436.mp3");
             }
             powerUp.active = false;
             score += 200;
@@ -2207,7 +2279,7 @@ void update(float deltaTime) {
     // Win condition - player entering the door
     if (keyCollected && !doorIsEntering && !playerBeingSucked) {
         float doorX = WIDTH / 2 - 40;
-        float doorY = HEIGHT - 120;
+        float doorY = HEIGHT - 150; // Match the door drawing position
         if (checkCollision(player.x, player.y, player.width, player.height,
                          doorX, doorY, 80, 120)) {
             // Start suction animation
@@ -2224,23 +2296,36 @@ void update(float deltaTime) {
     if (playerBeingSucked) {
         suctionAnimTime += deltaTime;
         
-        // Animation duration: 2 seconds
-        float suctionDuration = 2.0f;
+        // Animation phases:
+        // Phase 1 (0-0.3s): Continue moving briefly in current direction
+        // Phase 2 (0.3-2.5s): Stop, rotate with increasing speed, move toward door
+        float continueDuration = 0.3f;
+        float suctionDuration = 2.5f;
         float progress = std::min(1.0f, suctionAnimTime / suctionDuration);
         
         if (progress < 1.0f) {
-            // Freeze everything - don't update normal physics
-            // Move player towards door center with easing
-            float easeProgress = 1.0f - (1.0f - progress) * (1.0f - progress); // Ease in
-            
-            player.x = suctionStartX + (doorCenterX - suctionStartX) * easeProgress;
-            player.y = suctionStartY + (doorCenterY - suctionStartY) * easeProgress;
-            
-            // Fast clockwise rotation
-            playerFlipAngle = -progress * 720.0f * 3.0f; // Multiple fast spins
+            if (suctionAnimTime < continueDuration) {
+                // Phase 1: Brief continuation of movement
+                float continueProgress = suctionAnimTime / continueDuration;
+                player.x += player.velocityX * deltaTime * (1.0f - continueProgress);
+                player.y += player.velocityY * deltaTime * (1.0f - continueProgress);
+            } else {
+                // Phase 2: Suction toward door
+                float suctionProgress = (suctionAnimTime - continueDuration) / (suctionDuration - continueDuration);
+                // Ease in cubic for smooth acceleration
+                float easeProgress = suctionProgress * suctionProgress * suctionProgress;
+                
+                player.x = suctionStartX + (doorCenterX - suctionStartX) * easeProgress;
+                player.y = suctionStartY + (doorCenterY - suctionStartY) * easeProgress;
+                
+                // Rotation with increasing speed (starts slow, gets faster)
+                float rotationSpeed = suctionProgress * suctionProgress * 1440.0f; // Accelerating rotation
+                playerFlipAngle = -suctionProgress * rotationSpeed;
+            }
         } else {
             // Animation complete - trigger win
             gameState = GAME_WIN;
+            playSound("you-win-sequence-1-183948.mp3");
             initFallingCharacters(); // Initialize falling characters for win screen
         }
         
@@ -2276,6 +2361,7 @@ void keyboard(unsigned char key, int x, int y) {
                         lavaHeight = 50;
                         keySpawned = false;
                         keyCollected = false;
+                        playSound("game-start-6104.mp3");
                         initGame();
                         break;
                     case MENU_CHARACTER:
@@ -2317,6 +2403,7 @@ void keyboard(unsigned char key, int x, int y) {
                         if (gameState == GAME_WIN) {
                             initFallingCharacters(); // Clear falling characters
                         }
+                        playSound("game-start-6104.mp3");
                         initGame();
                         break;
                     case BUTTON_EXIT:
@@ -2909,6 +2996,12 @@ int main(int argc, char** argv) {
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // Black background
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    
+    // Load logo texture
+    logoTexture = loadTexture("IcyTowerLogo.png", &logoWidth, &logoHeight);
+    if (logoTexture == 0) {
+        std::cerr << "Warning: Failed to load logo texture. Using fallback." << std::endl;
+    }
     
     initGame();
     

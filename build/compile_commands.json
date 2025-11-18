@@ -1,0 +1,8 @@
+[
+{
+  "directory": "/Users/sorour/Documents/GitHub/Computer Graphics/build",
+  "command": "/usr/bin/clang++ -F/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/System/Library/Frameworks -g -std=gnu++20 -arch arm64 -o CMakeFiles/IcyTower.dir/main.cpp.o -c \"/Users/sorour/Documents/GitHub/Computer Graphics/main.cpp\"",
+  "file": "/Users/sorour/Documents/GitHub/Computer Graphics/main.cpp",
+  "output": "CMakeFiles/IcyTower.dir/main.cpp.o"
+}
+]
