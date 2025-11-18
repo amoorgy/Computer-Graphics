@@ -31,3 +31,10 @@ else()
     )
     target_include_directories(IcyTower PRIVATE ${OPENGL_INCLUDE_DIRS} ${GLUT_INCLUDE_DIRS})
 endif()
+
+# Copy asset files to build directory
+configure_file(${CMAKE_SOURCE_DIR}/IcyTowerLogo.png ${CMAKE_BINARY_DIR}/IcyTowerLogo.png COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/game-over-417465.mp3 ${CMAKE_BINARY_DIR}/game-over-417465.mp3 COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/game-bonus-02-294436.mp3 ${CMAKE_BINARY_DIR}/game-bonus-02-294436.mp3 COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/you-win-sequence-1-183948.mp3 ${CMAKE_BINARY_DIR}/you-win-sequence-1-183948.mp3 COPYONLY)
+configure_file(${CMAKE_SOURCE_DIR}/game-start-6104.mp3 ${CMAKE_BINARY_DIR}/game-start-6104.mp3 COPYONLY)
