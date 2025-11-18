@@ -1,4 +1,4 @@
-#ifdef __APPLE__
+ #ifdef __APPLE__
 #define GL_SILENCE_DEPRECATION
 #include <GLUT/glut.h>
 #else
@@ -76,15 +76,15 @@ WinLoseButton currentWinLoseButton = BUTTON_RESTART;
 
 // Player properties
 struct Player {
-    float x, y;                  // Position on screen
-    float velocityX, velocityY;  // Speed (horizontal & vertical)
-    float width, height;         // Size (collision box)
-    bool onGround;              // Touching a platform?
-    bool hasKey;                // Collected the purple key?
-    int powerUpType;            // 0=none, 1=shield, 2=double jump
-    float powerUpTimer;         // Seconds left of power-up
-    bool canDoubleJump;         // Can press jump again in air?
-    bool hasDoubleJumped;       // Already used double jump?
+    float x, y;
+    float velocityX, velocityY;
+    float width, height;
+    bool onGround;
+    bool hasKey;
+    int powerUpType; // 0 = none, 1 = shield, 2 = double jump
+    float powerUpTimer;
+    bool canDoubleJump;
+    bool hasDoubleJumped;
 } player;
 
 // Movement input state for smooth acceleration
@@ -708,7 +708,6 @@ void drawWitch(float x, float y, bool inMenu = false) {
     glVertex2f(25, 25); // Bottom right
     glVertex2f(20, 5);  // Top right
     glEnd();
-
     
     // Witch hat (triangle)
     glColor3f(0.1f, 0.0f, 0.2f);
